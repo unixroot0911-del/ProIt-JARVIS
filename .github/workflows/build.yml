@@ -1,7 +1,11 @@
 name: Build APK
 on:
   push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -21,3 +25,14 @@ jobs:
         with:
           name: jarvis-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK to apk branch
+        run: |
+          mkdir -p /tmp/out && cp app/build/outputs/apk/debug/app-debug.apk /tmp/out/jarvis.apk
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git checkout --orphan apk
+          git rm -rf . >/dev/null
+          cp /tmp/out/jarvis.apk .
+          git add jarvis.apk
+          git commit -m "APK build"
+          git push -f origin apk
