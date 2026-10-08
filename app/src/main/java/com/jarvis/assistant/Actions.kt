@@ -30,7 +30,7 @@ class Actions(private val context: Context) {
         return null
     }
 
-    private fun openApp(name: String): String? {
+    fun openApp(name: String): String? {
         val pm = context.packageManager
         val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val target = pm.queryIntentActivities(launcher, 0)

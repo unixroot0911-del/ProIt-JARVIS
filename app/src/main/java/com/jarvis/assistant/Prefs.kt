@@ -1,25 +1,70 @@
 package com.jarvis.assistant
 
 import android.content.Context
+import java.security.SecureRandom
 
 /** Local settings. API keys never leave the phone except in requests to their own provider. */
 class Prefs(context: Context) {
     private val sp = context.getSharedPreferences("jarvis_prefs", Context.MODE_PRIVATE)
 
+    private fun str(key: String, def: String = ""): String = sp.getString(key, def) ?: def
+    private fun put(key: String, v: String) = sp.edit().putString(key, v).apply()
+
     var geminiKey: String
-        get() = sp.getString("gemini_key", "") ?: ""
-        set(v) = sp.edit().putString("gemini_key", v.trim()).apply()
+        get() = str("gemini_key")
+        set(v) = put("gemini_key", v.trim())
 
     var groqKey: String
-        get() = sp.getString("groq_key", "") ?: ""
-        set(v) = sp.edit().putString("groq_key", v.trim()).apply()
+        get() = str("groq_key")
+        set(v) = put("groq_key", v.trim())
 
-    /** ar-MA first; the recognizer falls back to the device default if unsupported. */
     var speechLocale: String
-        get() = sp.getString("speech_locale", "ar-MA") ?: "ar-MA"
-        set(v) = sp.edit().putString("speech_locale", v).apply()
+        get() = str("speech_locale", "ar-MA")
+        set(v) = put("speech_locale", v.trim())
 
     var speakReplies: Boolean
         get() = sp.getBoolean("speak_replies", true)
         set(v) = sp.edit().putBoolean("speak_replies", v).apply()
+
+    /** "normal" or "study" */
+    var mode: String
+        get() = str("mode", "normal")
+        set(v) = put("mode", v)
+
+    var briefingsOn: Boolean
+        get() = sp.getBoolean("briefings_on", true)
+        set(v) = sp.edit().putBoolean("briefings_on", v).apply()
+
+    var morningTime: String
+        get() = str("morning_time", "07:30")
+        set(v) = put("morning_time", v)
+
+    var eveningTime: String
+        get() = str("evening_time", "21:00")
+        set(v) = put("evening_time", v)
+
+    var overlayOn: Boolean
+        get() = sp.getBoolean("overlay_on", false)
+        set(v) = sp.edit().putBoolean("overlay_on", v).apply()
+
+    var telegramToken: String
+        get() = str("tg_token")
+        set(v) = put("tg_token", v.trim())
+
+    /** Empty until the owner pairs with /pair CODE. Only this chat may command Jarvis. */
+    var telegramChatId: String
+        get() = str("tg_chat")
+        set(v) = put("tg_chat", v)
+
+    val pairCode: String
+        get() {
+            var c = str("pair_code")
+            if (c.isEmpty()) {
+                c = (SecureRandom().nextInt(900000) + 100000).toString()
+                put("pair_code", c)
+            }
+            return c
+        }
+
+    fun resetPairCode() = put("pair_code", "")
 }

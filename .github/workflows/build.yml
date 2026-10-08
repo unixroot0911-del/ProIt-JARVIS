@@ -20,19 +20,27 @@ jobs:
         with:
           gradle-version: 8.9
       - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
-      - uses: actions/upload-artifact@v4
-        with:
-          name: jarvis-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-      - name: Publish APK to apk branch
+        shell: bash
+        run: gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+      - name: Publish APK and build log to branches
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN_X: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p /tmp/out && cp app/build/outputs/apk/debug/app-debug.apk /tmp/out/jarvis.apk
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git checkout --orphan apk
-          git rm -rf . >/dev/null
-          cp /tmp/out/jarvis.apk .
-          git add jarvis.apk
-          git commit -m "APK build"
-          git push -f origin apk
+          publish() {
+            branch="$1"; shift
+            d=$(mktemp -d)
+            for f in "$@"; do cp "$f" "$d/"; done
+            cd "$d"
+            git init -q
+            git checkout -q -b "$branch"
+            git add -A
+            git -c user.name=actions -c user.email=actions@github.com commit -q -m "$branch"
+            git remote add origin "https://x-access-token:${GH_TOKEN_X}@github.com/${GITHUB_REPOSITORY}.git"
+            git push -q -f origin "$branch"
+            cd "$GITHUB_WORKSPACE"
+          }
+          [ -f build.log ] && tail -n 400 build.log > "$RUNNER_TEMP/build.log" && publish buildlog "$RUNNER_TEMP/build.log"
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          if [ -f "$APK" ]; then cp "$APK" "$RUNNER_TEMP/jarvis.apk"; publish apk "$RUNNER_TEMP/jarvis.apk"; fi

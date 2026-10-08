@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Jarvis</string>
+    <string name="a11y_desc">Lets Jarvis read the screen and tap, type and scroll for you when you ask it to run a task. It stops and asks before anything involving payments or deletion.</string>
 </resources>
