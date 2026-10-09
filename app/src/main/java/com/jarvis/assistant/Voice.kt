@@ -1,20 +1,28 @@
 package com.jarvis.assistant
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.speech.tts.TextToSpeech
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.Locale
+import kotlin.math.sqrt
 
-/** Speech in (on-device recognizer where available) and speech out (Android TTS, low deep pitch). */
+/**
+ * Voice in: Jarvis records the microphone itself (needs only Jarvis' own mic permission, no dependence on the
+ * phone's speech service) and the brain turns the audio into text. Voice out: Android TTS, low deep pitch.
+ */
 class Voice(private val context: Context, private val prefs: Prefs) {
 
-    private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    @Volatile private var finishNow = false
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -26,47 +34,87 @@ class Voice(private val context: Context, private val prefs: Prefs) {
         }
     }
 
-    fun listen(onPartial: (String) -> Unit, onResult: (String) -> Unit, onFail: (String) -> Unit) {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            onFail("Speech recognition is not available on this phone.")
-            return
+    /** Ends the current recording early, as if the user had stopped talking. */
+    fun finishRecording() { finishNow = true }
+
+    /**
+     * Records one utterance. Stops after about 1.3 s of silence once speech was heard, when [finishRecording] is called,
+     * or after 20 s. Returns a WAV, or null if nobody spoke. Throws a readable error if the microphone cannot be used.
+     */
+    suspend fun record(maxMs: Int = 20000): ByteArray? = withContext(Dispatchers.IO) {
+        finishNow = false
+        val rate = 16000
+        val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        if (minBuf <= 0) throw IllegalStateException("This phone cannot record audio at 16 kHz.")
+
+        val rec = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException("Cannot open the microphone: ${e.message}")
         }
-        recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context).also { r ->
-            r.setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle?) {
-                    val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                    if (text.isNullOrBlank()) onFail("I did not catch that.") else onResult(text)
-                }
-                override fun onPartialResults(partial: Bundle?) {
-                    partial?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(onPartial)
-                }
-                override fun onError(error: Int) {
-                    onFail(when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I did not hear anything."
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission is missing."
-                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Speech needs a connection right now."
-                        else -> "Speech error ($error)."
-                    })
-                }
-                override fun onReadyForSpeech(params: Bundle?) {}
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-            })
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            throw IllegalStateException("The microphone could not start. Check Jarvis' microphone permission, or close apps that use the mic.")
         }
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.speechLocale)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+
+        val pcm = ByteArrayOutputStream()
+        try {
+            rec.startRecording()
+            if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("Another app is using the microphone right now.")
+            }
+            val chunk = ShortArray(1600)   // 100 ms
+            var elapsed = 0
+            var speech = false
+            var silentMs = 0
+            var noise = 0.0
+            var calibrated = 0
+
+            while (isActive && elapsed < maxMs) {
+                val n = rec.read(chunk, 0, chunk.size)
+                if (n < 0) throw IllegalStateException("Microphone read error ($n).")
+                if (n == 0) continue
+
+                var sum = 0.0
+                for (i in 0 until n) sum += chunk[i].toDouble() * chunk[i].toDouble()
+                val rms = sqrt(sum / n)
+                val ms = n * 1000 / rate
+                elapsed += ms
+
+                val bb = ByteBuffer.allocate(n * 2).order(ByteOrder.LITTLE_ENDIAN)
+                for (i in 0 until n) bb.putShort(chunk[i])
+                pcm.write(bb.array())
+
+                if (calibrated < 3) {              // first 300 ms: learn the room noise
+                    noise += rms
+                    calibrated++
+                    if (calibrated == 3) noise = minOf(noise / 3.0, 1500.0)
+                    continue
+                }
+                val threshold = maxOf(minOf(noise * 2.5, 2500.0), 500.0)
+                if (rms > threshold) { speech = true; silentMs = 0 } else if (speech) silentMs += ms
+
+                if (speech && (silentMs >= 1300 || finishNow)) break
+                if (finishNow && !speech) break
+                if (!speech && elapsed > 8000) return@withContext null
+            }
+            if (!speech) null else wav(pcm.toByteArray(), rate)
+        } finally {
+            try { rec.stop() } catch (e: Exception) { /* already stopped */ }
+            rec.release()
         }
-        recognizer?.startListening(intent)
     }
 
-    fun stopListening() {
-        recognizer?.stopListening()
+    private fun wav(pcm: ByteArray, rate: Int): ByteArray {
+        val h = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+        h.put("RIFF".toByteArray()); h.putInt(36 + pcm.size); h.put("WAVE".toByteArray())
+        h.put("fmt ".toByteArray()); h.putInt(16); h.putShort(1.toShort()); h.putShort(1.toShort())
+        h.putInt(rate); h.putInt(rate * 2); h.putShort(2.toShort()); h.putShort(16.toShort())
+        h.put("data".toByteArray()); h.putInt(pcm.size)
+        return h.array() + pcm
     }
 
     /** Picks the TTS language from the reply text: Arabic script means Arabic voice, otherwise English. */
@@ -82,7 +130,7 @@ class Voice(private val context: Context, private val prefs: Prefs) {
     }
 
     fun shutdown() {
-        recognizer?.destroy()
+        finishNow = true
         tts?.stop()
         tts?.shutdown()
     }

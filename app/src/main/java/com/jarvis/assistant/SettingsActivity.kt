@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import android.Manifest
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -14,7 +15,10 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -52,6 +56,7 @@ class SettingsActivity : AppCompatActivity() {
         val overlay = switch("Floating orb over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
+        val testResult = TextView(this).apply { setTextColor(Color.WHITE); setPadding(0, 16, 0, 16) }
         refreshPairInfo()
 
         val save = button("SAVE") {
@@ -100,6 +105,21 @@ class SettingsActivity : AppCompatActivity() {
             addView(button("App info (if Android blocks restricted settings)") {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
             })
+            addView(button("3. Phone permissions (contacts, SMS, calendar, location)") {
+                ActivityCompat.requestPermissions(this@SettingsActivity, arrayOf(
+                    Manifest.permission.READ_CONTACTS, Manifest.permission.SEND_SMS,
+                    Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ), 7)
+            })
+            addView(label("DIAGNOSTICS"))
+            addView(button("TEST BRAINS") {
+                prefs.geminiKey = gemini.text.toString()
+                prefs.groqKey = groq.text.toString()
+                testResult.text = "Testing..."
+                lifecycleScope.launch { testResult.text = Brain(prefs, memory).diagnose() }
+            })
+            addView(testResult)
             addView(label(""))
             addView(save)
             addView(button("ERASE MEMORY") {

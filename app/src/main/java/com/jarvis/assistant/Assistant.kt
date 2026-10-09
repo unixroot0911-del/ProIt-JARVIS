@@ -9,8 +9,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/** [spoken] is what Jarvis says aloud; [shown] adds any action result for the screen or chat. */
-data class Reply(val spoken: String, val shown: String)
+/** [spoken] is what Jarvis says aloud; [shown] is what appears on screen or in the chat. */
+data class Reply(val spoken: String, val shown: String, val failed: Boolean = false)
 
 /** The single pipeline every input goes through: voice, typed text, Telegram, briefings. */
 class Assistant(context: Context) {
@@ -19,6 +19,7 @@ class Assistant(context: Context) {
     private val memory = Memory.get(appContext)
     val brain = Brain(prefs, memory)
     private val actions = Actions(appContext)
+    private val device = Device(appContext)
 
     private fun startOfDay(): Long {
         val c = Calendar.getInstance()
@@ -31,6 +32,8 @@ class Assistant(context: Context) {
     fun buildContext(detailed: Boolean = false): String {
         val sb = StringBuilder()
         sb.append("Now: ").append(SimpleDateFormat("EEEE yyyy-MM-dd HH:mm", Locale.ENGLISH).format(Date())).append('\n')
+        sb.append("Battery: ").append(device.batteryLine()).append('\n')
+        sb.append("Calendar today: ").append(device.calendarToday()).append('\n')
 
         val hours = if (detailed) 14 else 8
         val notifs = memory.recentNotifs(System.currentTimeMillis() - hours * 3600_000L, if (detailed) 30 else 12)
@@ -64,8 +67,22 @@ class Assistant(context: Context) {
         confirm: suspend (String) -> Boolean,
         onProgress: (String) -> Unit
     ): Reply {
+        // 1. Instant commands: no internet, no AI quota.
+        if (imageB64 == null) {
+            val off = Offline.parse(text, actions)
+            if (off != null) {
+                val type = off.actionType
+                val status = if (type != null) execute(type, off.actionArg ?: "", confirm, onProgress) else null
+                val out = status?.takeIf { it.isNotBlank() } ?: off.reply
+                return Reply(out, out)
+            }
+        }
+
+        // 2. Everything else goes to the brain.
         val ctx = withContext(Dispatchers.IO) { buildContext() }
         val d = brain.think(text, ctx, imageB64)
+        if (d.failed) return Reply(d.reply, d.reply, failed = true)
+
         withContext(Dispatchers.IO) {
             memory.addTurn("user", text)
             memory.addTurn("model", d.reply)
@@ -74,9 +91,8 @@ class Assistant(context: Context) {
 
         var shown = d.reply
         val type = d.actionType
-        val arg = d.actionArg
-        if (type != null && arg != null) {
-            val status = execute(type, arg, confirm, onProgress)
+        if (type != null) {
+            val status = execute(type, d.actionArg ?: "", confirm, onProgress)
             if (!status.isNullOrBlank()) shown = shown + "\n" + status
         }
         return Reply(d.reply, shown)
@@ -94,12 +110,18 @@ class Assistant(context: Context) {
             else "Cancelled."
         }
         return try {
-            when (type.lowercase()) {
-                "reply_notification" -> {
+            val t = type.lowercase()
+            when {
+                t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
+                t == "stop_agent" -> {
+                    val job = Engine.agentJob
+                    if (job?.isActive == true) { job.cancel(); "Agent stopped." } else "No agent is running."
+                }
+                t == "reply_notification" -> {
                     val p = arg.split("|", limit = 3)
                     withContext(Dispatchers.Default) { Replier.reply(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" }, p.getOrElse(2) { "" }) }
                 }
-                "log_expense" -> {
+                t == "log_expense" -> {
                     val p = arg.split("|", limit = 3)
                     val amount = p.getOrElse(0) { "" }.filter { it.isDigit() || it == '.' || it == ',' }.replace(',', '.').toDoubleOrNull()
                     if (amount == null) "I could not read the amount."
@@ -108,18 +130,18 @@ class Assistant(context: Context) {
                         "Logged ${"%.2f".format(amount)}."
                     }
                 }
-                "log_habit" -> { withContext(Dispatchers.IO) { memory.logHabit(arg) }; "Logged habit: $arg." }
-                "note" -> {
+                t == "log_habit" -> { withContext(Dispatchers.IO) { memory.logHabit(arg) }; "Logged habit: $arg." }
+                t == "note" -> {
                     val p = arg.split("|", limit = 2)
                     withContext(Dispatchers.IO) { memory.addNote(p.getOrElse(0) { "note" }, p.getOrElse(1) { p[0] }) }
                     "Saved to your study notes."
                 }
-                "set_mode" -> {
+                t == "set_mode" -> {
                     prefs.mode = if (arg.trim().lowercase() == "study") "study" else "normal"
                     "Mode: ${prefs.mode}."
                 }
-                "run_agent" -> {
-                    if (Engine.agentJob?.isActive == true) "An agent task is already running. Stop it first."
+                t == "run_agent" -> {
+                    if (Engine.agentJob?.isActive == true) "An agent task is already running. Say 'stop agent' first."
                     else {
                         val agent = ScreenAgent(appContext, brain)
                         Engine.agentJob = Engine.scope.launch {
@@ -140,7 +162,7 @@ class Assistant(context: Context) {
     suspend fun briefing(kind: String): String {
         val data = withContext(Dispatchers.IO) { buildContext(detailed = true) }
         val ask = if (kind == "morning")
-            "Write the user's MORNING briefing: a short greeting with no titles, today's date, what matters from the notifications, " +
+            "Write the user's MORNING briefing: a short greeting with no titles, today's date, today's calendar, what matters from the notifications, " +
                 "a snapshot of habits and spending, and the 3 priorities you suggest for today. Maximum 120 words."
         else
             "Write the user's EVENING briefing: what happened today, anything unanswered in the notifications, " +

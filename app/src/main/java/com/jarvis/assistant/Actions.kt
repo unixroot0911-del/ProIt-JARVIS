@@ -5,7 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.AlarmClock
 
-/** Executes phone actions. Phase 1 covers what standard Android intents allow without special access. */
+/** Actions that need only standard Android intents. Direct phone control lives in Device.kt. */
 class Actions(private val context: Context) {
 
     /** Returns a short status string, or null if nothing needs to be added to the reply. */
@@ -16,6 +16,7 @@ class Actions(private val context: Context) {
                 "set_alarm" -> setAlarm(arg)
                 "set_timer" -> setTimer(arg)
                 "web_search" -> launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(arg))))
+                "open_url" -> launch(Intent(Intent.ACTION_VIEW, Uri.parse(if (arg.startsWith("http")) arg else "https://$arg")))
                 "call" -> launch(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(arg))))
                 else -> "Action '$type' is not supported yet."
             }
@@ -30,13 +31,18 @@ class Actions(private val context: Context) {
         return null
     }
 
-    fun openApp(name: String): String? {
+    /** Package name of the launchable app whose label contains [name], or null. */
+    fun findApp(name: String): String? {
         val pm = context.packageManager
         val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val target = pm.queryIntentActivities(launcher, 0)
-            .firstOrNull { it.loadLabel(pm).toString().contains(name, ignoreCase = true) }
-            ?: return "I could not find an app called $name."
-        val i = pm.getLaunchIntentForPackage(target.activityInfo.packageName) ?: return "Cannot launch $name."
+        return pm.queryIntentActivities(launcher, 0)
+            .firstOrNull { it.loadLabel(pm).toString().contains(name.trim(), ignoreCase = true) }
+            ?.activityInfo?.packageName
+    }
+
+    fun openApp(name: String): String? {
+        val pkg = findApp(name) ?: return "I could not find an app called $name."
+        val i = context.packageManager.getLaunchIntentForPackage(pkg) ?: return "Cannot launch $name."
         return launch(i)
     }
 

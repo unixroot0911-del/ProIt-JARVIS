@@ -18,6 +18,15 @@ class Prefs(context: Context) {
         get() = str("groq_key")
         set(v) = put("groq_key", v.trim())
 
+    /** Last model that worked for each provider; rediscovered automatically if it is retired. */
+    var geminiModel: String
+        get() = str("gemini_model")
+        set(v) = put("gemini_model", v)
+
+    var groqModel: String
+        get() = str("groq_model")
+        set(v) = put("groq_model", v)
+
     var speechLocale: String
         get() = str("speech_locale", "ar-MA")
         set(v) = put("speech_locale", v.trim())

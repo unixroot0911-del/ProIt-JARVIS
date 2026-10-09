@@ -165,19 +165,46 @@ class MainActivity : AppCompatActivity() {
         process(t)
     }
 
+    private var listening = false
+
     private fun startListening() {
+        if (listening) { voice.finishRecording(); return }   // tapping TALK again ends the recording
         if (busy) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            transcript.text = "Allow the microphone, then tap TALK again."
             requestPermissionsIfNeeded()
             return
         }
         busy = true
-        setState(OrbState.LISTENING, "LISTENING")
-        voice.listen(
-            onPartial = { transcript.text = it },
-            onResult = { text -> transcript.text = text; process(text) },
-            onFail = { msg -> transcript.text = msg; busy = false; setState(OrbState.IDLE, "ONLINE") }
-        )
+        listening = true
+        setState(OrbState.LISTENING, "LISTENING  (tap TALK to finish)")
+        lifecycleScope.launch {
+            try {
+                val wav = voice.record()
+                listening = false
+                if (wav == null) {
+                    transcript.text = "I did not hear anything."
+                    busy = false
+                    setState(OrbState.IDLE, "ONLINE")
+                    return@launch
+                }
+                setState(OrbState.THINKING, "TRANSCRIBING")
+                val text = assistant.brain.transcribe(wav)
+                if (text.isBlank()) {
+                    transcript.text = "I did not catch that."
+                    busy = false
+                    setState(OrbState.IDLE, "ONLINE")
+                    return@launch
+                }
+                transcript.text = text
+                process(text)
+            } catch (e: Exception) {
+                listening = false
+                busy = false
+                transcript.text = e.message ?: "Microphone error."
+                setState(OrbState.IDLE, "ONLINE")
+            }
+        }
     }
 
     private fun takeShot() {
@@ -229,8 +256,10 @@ class MainActivity : AppCompatActivity() {
                 onProgress = { msg -> runOnUiThread { transcript.text = msg } }
             )
             transcript.text = r.shown
-            setState(OrbState.SPEAKING, "SPEAKING")
-            voice.speak(r.spoken)
+            if (!r.failed) {
+                setState(OrbState.SPEAKING, "SPEAKING")
+                voice.speak(r.spoken)
+            }
             busy = false
             setState(OrbState.IDLE, "ONLINE")
         }
