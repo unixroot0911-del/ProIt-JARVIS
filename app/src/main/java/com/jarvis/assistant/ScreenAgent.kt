@@ -89,6 +89,35 @@ class JarvisAccessibilityService : AccessibilityService() {
         )
     }
 
+    /** Waits up to [timeoutMs] for a button (by view id or label) and taps it. Used to press Send in chat apps. */
+    fun clickSend(viewIds: List<String>, labels: List<String>, timeoutMs: Long): Boolean {
+        val end = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < end) {
+            val root = rootInActiveWindow
+            if (root != null) {
+                for (id in viewIds) {
+                    val hit = root.findAccessibilityNodeInfosByViewId(id)?.firstOrNull()
+                    if (hit != null && click(hit)) return true
+                }
+                val byLabel = findByLabel(root, labels)
+                if (byLabel != null && click(byLabel)) return true
+            }
+            Thread.sleep(400)
+        }
+        return false
+    }
+
+    private fun findByLabel(n: AccessibilityNodeInfo, labels: List<String>): AccessibilityNodeInfo? {
+        val d = (n.contentDescription?.toString() ?: n.text?.toString() ?: "").trim().lowercase()
+        if (d.isNotEmpty() && labels.any { d == it }) return n
+        for (i in 0 until n.childCount) {
+            val c = n.getChild(i) ?: continue
+            val r = findByLabel(c, labels)
+            if (r != null) return r
+        }
+        return null
+    }
+
     fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
 }
@@ -135,7 +164,7 @@ class ScreenAgent(private val context: Context, private val brain: Brain) {
             }
 
             val o = try {
-                JSONObject(raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
+                JSONObject(Brain.extractJson(raw))
             } catch (e: Exception) {
                 steps.add("$i. (unreadable answer)")
                 delay(800)

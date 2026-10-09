@@ -1,13 +1,20 @@
 package com.jarvis.assistant
 
+import android.util.Base64
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import android.util.Base64
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** What the brain decided: words to say, plus an optional action for the phone to perform. */
 data class Decision(
@@ -21,6 +28,8 @@ data class Decision(
 )
 
 class HttpError(val code: Int, val body: String) : RuntimeException(describe(code, body)) {
+    val retriable: Boolean get() = code == 408 || code == 429 || code in 500..504
+
     companion object {
         private fun describe(code: Int, body: String): String {
             val msg = try {
@@ -34,27 +43,46 @@ class HttpError(val code: Int, val body: String) : RuntimeException(describe(cod
 }
 
 /**
- * Free-tier reasoning with automatic fallback: Gemini first, Groq second.
- * Model names are never hard-wired: each provider is asked which models it currently serves,
- * the best one is chosen and remembered, and if it is retired the next one is tried automatically.
+ * Free-tier reasoning built to stay fast and never stall:
+ *  - Groq answers first (very fast); if it is slow, Gemini starts in parallel and the first good answer wins.
+ *  - A provider that just failed or is overloaded is skipped for a minute.
+ *  - Model names are never hard-wired: each provider is asked which models it serves, and retired or overloaded
+ *    models are replaced automatically.
  */
 class Brain(private val prefs: Prefs, private val memory: Memory) {
+
+    companion object {
+        private val badUntil = ConcurrentHashMap<String, Long>()
+        private fun isBad(p: String) = (badUntil[p] ?: 0L) > System.currentTimeMillis()
+        private fun markBad(p: String) { badUntil[p] = System.currentTimeMillis() + 60_000L }
+        private fun markGood(p: String) { badUntil.remove(p) }
+
+        /** Pulls the JSON object out of a reply that may contain extra words or markdown fences. */
+        fun extractJson(raw: String): String {
+            val t = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            val a = t.indexOf('{')
+            val b = t.lastIndexOf('}')
+            return if (a >= 0 && b > a) t.substring(a, b + 1) else t
+        }
+    }
 
     private val base = """
         You are JARVIS, the personal AI system on the user's Android phone. Personality: sharp, bold, ambitious,
         confident, dry wit, never servile. Do not use any title or honorific for the user (no "sir", no "boss").
         Language: reply in the language the user spoke. Understand Modern Standard Arabic, Moroccan Darija and English;
-        if the user mixes them, mix naturally. Keep replies short enough to be spoken aloud (1-3 sentences) unless asked for more.
+        if the user mixes them, mix naturally. Be fast and brief: usually one or two sentences, never more than
+        five unless the user asks for detail.
     """.trimIndent()
 
     private val jsonRules = """
 
-        Respond ONLY with one JSON object, no markdown, with these keys:
+        Respond ONLY with one JSON object, no markdown, no text outside it, with these keys:
           "reply": string, what you say to the user.
           "action": null or {"type": string, "arg": string}. Supported types:
+              "send_message" (arg = "app|contact or number|message text"; app is whatsapp, sms, telegram, instagram... any app),
+              "call_contact" (arg = contact name or number),
               "open_app" (arg = app name), "open_url" (arg = address), "web_search" (arg = query),
               "set_alarm" (arg = "HH:MM"), "set_timer" (arg = seconds),
-              "call_contact" (arg = contact name or number), "send_sms" (arg = "contact or number|message text"),
               "calendar_add" (arg = "title|yyyy-MM-dd HH:mm|minutes"),
               "media" (arg = "play", "pause", "next" or "previous"), "volume" (arg = "up", "down", "mute" or 0-100),
               "flashlight" (arg = "on" or "off"), "battery" (arg = ""), "where_am_i" (arg = ""),
@@ -87,58 +115,105 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
         val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
         return try {
-            parse(complete(system, userText, memory.recentTurns(), imageB64, json = true))
+            parse(complete(system, userText, memory.recentTurns(8), imageB64, json = true))
         } catch (e: Exception) {
             Decision(e.message ?: "The brain is unreachable.", failed = true)
         }
     }
 
-    /** One completion with provider fallback. Throws with a readable reason when every provider fails. */
+    // ---- provider race ----
+
+    private fun attempt(name: String, block: () -> String): Result<String> =
+        try {
+            val r = block()
+            markGood(name)
+            Result.success(r)
+        } catch (e: Exception) {
+            val transient = (e is HttpError && e.retriable) || e is IOException
+            if (transient) markBad(name)
+            Result.failure(IllegalStateException("$name: ${e.message}"))
+        }
+
+    private suspend fun race(runners: List<Pair<String, () -> String>>, hedgeMs: Long): String {
+        val winner = CompletableDeferred<String>()
+        val errors = java.util.Collections.synchronizedList(ArrayList<String>())
+        val failed = AtomicInteger(0)
+        val secondStarted = AtomicBoolean(false)
+
+        fun launchRunner(i: Int) {
+            Engine.scope.launch(Dispatchers.IO) {
+                val r = attempt(runners[i].first, runners[i].second)
+                if (r.isSuccess) {
+                    winner.complete(r.getOrThrow())
+                } else {
+                    errors.add(r.exceptionOrNull()?.message ?: "failed")
+                    if (i == 0 && runners.size > 1 && secondStarted.compareAndSet(false, true)) launchRunner(1)
+                    if (failed.incrementAndGet() >= runners.size) {
+                        winner.completeExceptionally(
+                            IllegalStateException("All brains failed. " + errors.joinToString(" | ") + "  (Settings > TEST BRAINS shows details)")
+                        )
+                    }
+                }
+            }
+        }
+
+        launchRunner(0)
+        if (runners.size > 1) {
+            Engine.scope.launch {
+                delay(hedgeMs)
+                if (!winner.isCompleted && secondStarted.compareAndSet(false, true)) launchRunner(1)
+            }
+        }
+        return winner.await()
+    }
+
+    /** One completion. Throws with a readable reason when every provider fails. */
     suspend fun complete(
         system: String,
         userText: String,
         history: List<Turn> = emptyList(),
         imageB64: String? = null,
         json: Boolean = true
-    ): String = withContext(Dispatchers.IO) {
-        val errors = ArrayList<String>()
-        if (prefs.geminiKey.isNotEmpty()) {
-            try { return@withContext geminiRun(system, geminiContents(history, userText, imageB64), json) }
-            catch (e: Exception) { errors.add("Gemini: ${e.message}") }
+    ): String {
+        val haveGemini = prefs.geminiKey.isNotEmpty()
+        val haveGroq = prefs.groqKey.isNotEmpty() && imageB64 == null
+        if (!haveGemini && !haveGroq) {
+            throw IllegalStateException(
+                if (imageB64 != null && prefs.groqKey.isNotEmpty()) "Vision needs a Gemini key. Add one in Settings."
+                else "No API key is set. Open Settings and add a free Gemini or Groq key."
+            )
         }
-        if (imageB64 == null && prefs.groqKey.isNotEmpty()) {
-            try { return@withContext groqRun(system, groqMessages(system, history, userText), json) }
-            catch (e: Exception) { errors.add("Groq: ${e.message}") }
-        }
-        val why = when {
-            errors.isNotEmpty() -> "All brains failed. " + errors.joinToString(" | ") + "  (Settings > TEST BRAINS shows details)"
-            imageB64 != null -> "Vision needs a Gemini key. Add one in Settings."
-            else -> "No API key is set. Open Settings and add a free Gemini or Groq key."
-        }
-        throw IllegalStateException(why)
+        val runners = ArrayList<Pair<String, () -> String>>()
+        if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json) })
+        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json) })
+        runners.sortBy { if (isBad(it.first)) 1 else 0 }     // healthy first; Groq leads when both are healthy
+        return race(runners, hedgeMs = 6000)
     }
 
     // ---- speech to text ----
 
-    /** Turns a recorded WAV into text. Gemini first (best with Darija), Groq Whisper as the fallback. */
+    /** Turns a recorded WAV into text. Groq Whisper is the fast default; Gemini is more accurate with Darija. */
     suspend fun transcribe(wav: ByteArray): String = withContext(Dispatchers.IO) {
         val errors = ArrayList<String>()
-        if (prefs.geminiKey.isNotEmpty()) {
-            try {
-                val parts = JSONArray()
-                    .put(JSONObject().put("text",
-                        "Transcribe this audio exactly as spoken. The speaker may use Modern Standard Arabic, Moroccan Darija, " +
-                            "French or English, possibly mixed. Write Arabic and Darija in Arabic script. " +
-                            "Output ONLY the transcript, nothing else. If there is no intelligible speech, output nothing."))
-                    .put(JSONObject().put("inline_data", JSONObject()
-                        .put("mime_type", "audio/wav").put("data", Base64.encodeToString(wav, Base64.NO_WRAP))))
-                val contents = JSONArray().put(JSONObject().put("role", "user").put("parts", parts))
-                return@withContext geminiRun("", contents, false).trim()
-            } catch (e: Exception) { errors.add("Gemini: ${e.message}") }
-        }
-        if (prefs.groqKey.isNotEmpty()) {
-            try { return@withContext groqTranscribe(wav).trim() }
-            catch (e: Exception) { errors.add("Groq: ${e.message}") }
+        val order = if (prefs.sttGeminiFirst) listOf("Gemini", "Groq") else listOf("Groq", "Gemini")
+        for (p in order) {
+            if (p == "Groq" && prefs.groqKey.isNotEmpty()) {
+                try { return@withContext groqTranscribe(wav).trim() }
+                catch (e: Exception) { errors.add("Groq: ${e.message}") }
+            }
+            if (p == "Gemini" && prefs.geminiKey.isNotEmpty()) {
+                try {
+                    val parts = JSONArray()
+                        .put(JSONObject().put("text",
+                            "Transcribe this audio exactly as spoken. The speaker may use Modern Standard Arabic, Moroccan Darija, " +
+                                "French or English, possibly mixed. Write Arabic and Darija in Arabic script. " +
+                                "Output ONLY the transcript, nothing else. If there is no intelligible speech, output nothing."))
+                        .put(JSONObject().put("inline_data", JSONObject()
+                            .put("mime_type", "audio/wav").put("data", Base64.encodeToString(wav, Base64.NO_WRAP))))
+                    val contents = JSONArray().put(JSONObject().put("role", "user").put("parts", parts))
+                    return@withContext geminiRun("", contents, false).trim()
+                } catch (e: Exception) { errors.add("Gemini: ${e.message}") }
+            }
         }
         throw IllegalStateException(
             if (errors.isEmpty()) "Voice needs a free Gemini or Groq key. Add one in Settings, or type instead."
@@ -150,35 +225,32 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     suspend fun diagnose(): String = withContext(Dispatchers.IO) {
         val sb = StringBuilder()
-        sb.append("GEMINI: ")
-        if (prefs.geminiKey.isEmpty()) sb.append("no key set\n") else {
+        fun probe(name: String, hasKey: Boolean, model: () -> String, run: () -> String, list: () -> List<String>) {
+            sb.append(name).append(": ")
+            if (!hasKey) { sb.append("no key set\n"); return }
+            val t0 = System.currentTimeMillis()
             try {
-                val r = geminiRun("Reply with the single word OK.", geminiContents(emptyList(), "ping", null), false)
-                sb.append("working with ${prefs.geminiModel} (answered: ${r.trim().take(20)})\n")
+                val r = run()
+                sb.append("working with ${model()} in ${System.currentTimeMillis() - t0} ms (answered: ${r.trim().take(20)})\n")
             } catch (e: Exception) {
-                sb.append("FAILED, ${e.message}\n")
-                try { sb.append("  models it offers: ").append(discoverGemini().take(6).joinToString(", ").ifEmpty { "none" }).append('\n') }
+                sb.append("FAILED after ${System.currentTimeMillis() - t0} ms, ${e.message}\n")
+                try { sb.append("  models it offers: ").append(list().take(6).joinToString(", ").ifEmpty { "none" }).append('\n') }
                 catch (e2: Exception) { sb.append("  could not list models: ${e2.message}\n") }
             }
         }
-        sb.append("GROQ: ")
-        if (prefs.groqKey.isEmpty()) sb.append("no key set\n") else {
-            try {
-                val r = groqRun("Reply with the single word OK.", groqMessages("Reply with the single word OK.", emptyList(), "ping"), false)
-                sb.append("working with ${prefs.groqModel} (answered: ${r.trim().take(20)})\n")
-            } catch (e: Exception) {
-                sb.append("FAILED, ${e.message}\n")
-                try { sb.append("  models it offers: ").append(discoverGroq().take(6).joinToString(", ").ifEmpty { "none" }).append('\n') }
-                catch (e2: Exception) { sb.append("  could not list models: ${e2.message}\n") }
-            }
-        }
+        probe("GROQ", prefs.groqKey.isNotEmpty(), { prefs.groqModel },
+            { groqRun("Reply with the single word OK.", groqMessages("Reply with the single word OK.", emptyList(), "ping"), false) },
+            { discoverGroq() })
+        probe("GEMINI", prefs.geminiKey.isNotEmpty(), { prefs.geminiModel },
+            { geminiRun("Reply with the single word OK.", geminiContents(emptyList(), "ping", null), false) },
+            { discoverGemini() })
         sb.toString()
     }
 
     // ---- parsing ----
 
     private fun parse(raw: String): Decision {
-        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val cleaned = extractJson(raw)
         return try {
             val o = JSONObject(cleaned)
             val act = o.optJSONObject("action")
@@ -189,18 +261,22 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
                 remember = o.optString("remember", "").takeIf { it.isNotEmpty() && it != "null" }
             )
         } catch (e: Exception) {
-            Decision(cleaned)
+            Decision(raw.trim())
         }
     }
 
     // ---- model selection ----
 
     private val geminiFallbacks = listOf(
-        "gemini-flash-latest", "gemini-3-flash", "gemini-2.5-flash",
-        "gemini-flash-lite-latest", "gemini-3.1-flash-lite", "gemini-2.0-flash"
+        "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3-flash",
+        "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"
     )
     private val groqPreferred = listOf("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b")
 
+    /**
+     * Tries the remembered model first, then every model the provider offers, then known fallbacks.
+     * Retired models (404) and overloaded ones (429, 5xx) move on to the next candidate; bad keys fail fast.
+     */
     private fun <T> tryModels(
         cached: String,
         discover: () -> List<String>,
@@ -212,15 +288,17 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         val queue = ArrayDeque<String>()
         if (cached.isNotEmpty()) queue.add(cached)
         var expanded = false
+        var cachedGone = false
+        var attempts = 0
         var last: Exception = IllegalStateException("No usable model found")
-        while (true) {
+        while (attempts < 5) {
             if (queue.isEmpty()) {
                 if (expanded) break
                 expanded = true
                 try {
                     discover().forEach { if (it !in tried) queue.add(it) }
                 } catch (e: HttpError) {
-                    if (e.code != 404) throw e   // bad key, quota or outage: other models will not help
+                    if (!e.retriable && e.code != 404) throw e   // bad key: other models will not help
                     last = e
                 } catch (e: Exception) {
                     last = e
@@ -230,14 +308,16 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             }
             val m = queue.removeFirst()
             if (!tried.add(m)) continue
+            attempts++
             try {
                 val r = call(m)
-                save(m)
+                if (cached.isEmpty() || cachedGone || m == cached) save(m)   // do not stick to a fallback after a brief overload
                 return r
             } catch (e: HttpError) {
                 last = e
-                val modelProblem = e.code == 404 || (e.code == 400 && e.body.contains("model", ignoreCase = true))
-                if (!modelProblem) throw e
+                val gone = e.code == 404 || (e.code == 400 && e.body.contains("model", ignoreCase = true))
+                if (gone && m == cached) cachedGone = true
+                if (!gone && !e.retriable) throw e
             }
         }
         throw last
@@ -245,7 +325,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     private fun discoverGemini(): List<String> {
         val resp = request("GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", null, null,
-            mapOf("x-goog-api-key" to prefs.geminiKey))
+            mapOf("x-goog-api-key" to prefs.geminiKey), 15000)
         val arr = JSONObject(resp).optJSONArray("models") ?: return emptyList()
         val names = ArrayList<String>()
         for (i in 0 until arr.length()) {
@@ -264,15 +344,15 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         fun ver(n: String) = Regex("""gemini-(\d+(?:\.\d+)?)""").find(n)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
         return ok.sortedWith(compareBy<String>(
             { it.contains("preview") || it.contains("exp") },
-            { it.contains("lite") },
             { -ver(it) },
+            { !it.contains("lite") },     // lite models answer fastest, so they lead within a version
             { it.length }
         ))
     }
 
     private fun discoverGroq(): List<String> {
         val resp = request("GET", "https://api.groq.com/openai/v1/models", null, null,
-            mapOf("Authorization" to "Bearer ${prefs.groqKey}"))
+            mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 15000)
         val arr = JSONObject(resp).optJSONArray("data") ?: return emptyList()
         val ids = ArrayList<String>()
         for (i in 0 until arr.length()) ids.add(arr.getJSONObject(i).getString("id"))
@@ -300,19 +380,34 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     private fun geminiRun(system: String, contents: JSONArray, json: Boolean): String =
         tryModels(prefs.geminiModel, { discoverGemini() }, geminiFallbacks, { prefs.geminiModel = it }) { model ->
-            val gen = JSONObject().put("temperature", 0.7)
-            if (json) gen.put("responseMimeType", "application/json")
-            val body = JSONObject().put("contents", contents).put("generationConfig", gen)
-            if (system.isNotBlank()) {
-                body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+            fun send(fast: Boolean): String {
+                val gen = JSONObject().put("temperature", 0.7)
+                if (json) gen.put("responseMimeType", "application/json")
+                if (fast) {
+                    // Gemini 2.5 and 3 "think" before answering, which costs seconds. Ask for no or minimal thinking.
+                    gen.put("thinkingConfig",
+                        if (model.contains("2.5")) JSONObject().put("thinkingBudget", 0)
+                        else JSONObject().put("thinkingLevel", "minimal"))
+                }
+                val body = JSONObject().put("contents", contents).put("generationConfig", gen)
+                if (system.isNotBlank()) {
+                    body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+                }
+                val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
+                    body.toString().toByteArray(Charsets.UTF_8), "application/json",
+                    mapOf("x-goog-api-key" to prefs.geminiKey), 30000)
+                val parts = JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
+                    ?.optJSONObject("content")?.optJSONArray("parts")
+                val sb = StringBuilder()
+                if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
+                return sb.toString()
             }
-            val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
-                body.toString().toByteArray(Charsets.UTF_8), "application/json", mapOf("x-goog-api-key" to prefs.geminiKey))
-            val cands = JSONObject(resp).optJSONArray("candidates")
-            val parts = cands?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-            val sb = StringBuilder()
-            if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
-            sb.toString()
+            try {
+                send(true)
+            } catch (e: HttpError) {
+                // this model may not accept the thinking setting: retry plainly
+                if (e.code == 400) send(false) else throw e
+            }
         }
 
     // ---- Groq ----
@@ -326,24 +421,30 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         return msgs
     }
 
-    private fun groqRun(system: String, messages: JSONArray, json: Boolean): String =
+    /**
+     * JSON mode is deliberately not used: it makes some models fail with "Failed to generate JSON".
+     * The prompt demands JSON and [extractJson] recovers it from whatever the model returns.
+     */
+    private fun groqRun(system: String, messages: JSONArray, @Suppress("UNUSED_PARAMETER") json: Boolean): String =
         tryModels(prefs.groqModel, { discoverGroq() }, groqPreferred, { prefs.groqModel = it }) { model ->
-            fun send(withJson: Boolean): String {
-                val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.7)
-                if (withJson) body.put("response_format", JSONObject().put("type", "json_object"))
-                if (model.contains("gpt-oss")) body.put("reasoning_effort", "low")
+            fun send(tuned: Boolean): String {
+                val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.6)
+                if (tuned) {
+                    body.put("max_completion_tokens", 1024)
+                    if (model.contains("gpt-oss")) body.put("reasoning_effort", "low")
+                    else if (model.contains("qwen")) body.put("reasoning_effort", "none")
+                }
                 val resp = request("POST", "https://api.groq.com/openai/v1/chat/completions",
                     body.toString().toByteArray(Charsets.UTF_8), "application/json",
-                    mapOf("Authorization" to "Bearer ${prefs.groqKey}"))
+                    mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 30000)
                 return JSONObject(resp).getJSONArray("choices").getJSONObject(0)
                     .getJSONObject("message").optString("content", "")
             }
-            if (!json) send(false)
-            else try {
+            try {
                 send(true)
             } catch (e: HttpError) {
-                // some models reject JSON mode; the prompt already demands JSON, so retry without it
-                if (e.code == 400 && e.body.contains("response_format", ignoreCase = true)) send(false) else throw e
+                // an optional tuning parameter may be rejected by this model: retry plainly
+                if (e.code == 400) send(false) else throw e
             }
         }
 
@@ -364,11 +465,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             out.write("\r\n--$boundary--\r\n".toByteArray())
             try {
                 val resp = request("POST", "https://api.groq.com/openai/v1/audio/transcriptions", out.toByteArray(),
-                    "multipart/form-data; boundary=$boundary", mapOf("Authorization" to "Bearer ${prefs.groqKey}"))
+                    "multipart/form-data; boundary=$boundary", mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 30000)
                 return JSONObject(resp).optString("text", "")
             } catch (e: HttpError) {
                 last = e
-                if (e.code != 404 && e.code != 400) throw e
+                if (e.code != 404 && e.code != 400 && !e.retriable) throw e
             }
         }
         throw last
@@ -376,12 +477,15 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     // ---- HTTP ----
 
-    private fun request(method: String, url: String, body: ByteArray?, contentType: String?, headers: Map<String, String>): String {
+    private fun request(
+        method: String, url: String, body: ByteArray?, contentType: String?,
+        headers: Map<String, String>, readTimeoutMs: Int
+    ): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = method
-            c.connectTimeout = 15000
-            c.readTimeout = 60000
+            c.connectTimeout = 8000
+            c.readTimeout = readTimeoutMs
             headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
             if (body != null) {
                 c.doOutput = true

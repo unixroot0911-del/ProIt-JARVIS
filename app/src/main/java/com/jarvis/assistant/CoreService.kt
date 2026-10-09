@@ -1,7 +1,9 @@
 package com.jarvis.assistant
 
+import android.Manifest
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.IBinder
@@ -10,29 +12,55 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-/** Keeps the Telegram bot running and draws the floating orb over other apps. */
+/** Keeps the Telegram bot running and draws the floating orb and floating chat over other apps. */
 class CoreService : Service() {
 
     private var botJob: Job? = null
     private var orb: OrbView? = null
     private var orbListener: ((OrbState) -> Unit)? = null
+    private var assistant: Assistant? = null
+    private var voice: Voice? = null
+    private var chat: FloatingChat? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun goForeground(): Boolean {
+        val notif = Notifier.build(this)
+        val micOk = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        val data = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        // With the microphone type the floating chat can record while another app is in front.
+        if (micOk) {
+            try {
+                ServiceCompat.startForeground(this, Notifier.ID, notif, data or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                return true
+            } catch (e: Exception) { /* not allowed right now, fall back to data sync only */ }
+        }
+        return try {
+            ServiceCompat.startForeground(this, Notifier.ID, notif, data)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        ServiceCompat.startForeground(this, Notifier.ID, Notifier.build(this), ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        if (!goForeground()) { stopSelf(); return START_NOT_STICKY }
         val prefs = Prefs(this)
 
+        val a = assistant ?: Assistant(applicationContext).also { assistant = it }
+        val v = voice ?: Voice(applicationContext, prefs).also { voice = it }
+        if (chat == null) chat = FloatingChat(this, a, v)
+
         if (botJob?.isActive != true) {
-            val assistant = Assistant(applicationContext)
-            botJob = Engine.scope.launch { TelegramBot(prefs, assistant).loop() }
+            botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }
         }
 
-        if (prefs.overlayOn && Settings.canDrawOverlays(this)) showOrb() else hideOrb()
+        if (prefs.overlayOn && Settings.canDrawOverlays(this)) showOrb() else { hideOrb(); chat?.hide() }
         return START_STICKY
     }
 
@@ -67,13 +95,7 @@ class CoreService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved) {
-                        startActivity(
-                            Intent(this, MainActivity::class.java)
-                                .putExtra(MainActivity.EXTRA_LISTEN, true)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        )
-                    }
+                    if (!moved) chat?.toggle()     // tap the orb: open or close the floating chat
                     true
                 }
                 else -> false
@@ -96,14 +118,16 @@ class CoreService : Service() {
         orbListener?.let { Bus.listeners.remove(it) }
         orbListener = null
         orb?.let {
-            try { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } catch (e: Exception) {}
+            try { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } catch (e: Exception) { /* gone */ }
         }
         orb = null
     }
 
     override fun onDestroy() {
+        chat?.hide()
         hideOrb()
         botJob?.cancel()
+        voice?.shutdown()
         super.onDestroy()
     }
 }

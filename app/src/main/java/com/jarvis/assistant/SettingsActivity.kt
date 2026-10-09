@@ -49,11 +49,12 @@ class SettingsActivity : AppCompatActivity() {
         val groq = field(prefs.groqKey, "Groq API key (free: console.groq.com)", true)
         val locale = field(prefs.speechLocale, "Speech language, e.g. ar-MA, ar-SA, en-US")
         val speak = switch("Speak replies", prefs.speakReplies)
+        val sttAccurate = switch("Voice: Gemini first (more accurate, slower)", prefs.sttGeminiFirst)
         val study = switch("Study mode (tutor + quizzes)", prefs.mode == "study")
         val briefings = switch("Morning and evening briefings", prefs.briefingsOn)
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
-        val overlay = switch("Floating orb over other apps", prefs.overlayOn)
+        val overlay = switch("Floating Jarvis: orb + chat window over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
         val testResult = TextView(this).apply { setTextColor(Color.WHITE); setPadding(0, 16, 0, 16) }
@@ -64,6 +65,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.groqKey = groq.text.toString()
             prefs.speechLocale = locale.text.toString().ifBlank { "ar-MA" }
             prefs.speakReplies = speak.isChecked
+            prefs.sttGeminiFirst = sttAccurate.isChecked
             prefs.mode = if (study.isChecked) "study" else "normal"
             prefs.briefingsOn = briefings.isChecked
             prefs.morningTime = morning.text.toString().ifBlank { "07:30" }
@@ -82,7 +84,7 @@ class SettingsActivity : AppCompatActivity() {
 
             addView(label("BRAIN 1: GEMINI")); addView(gemini)
             addView(label("BRAIN 2: GROQ (automatic fallback)")); addView(groq)
-            addView(label("VOICE")); addView(locale); addView(speak)
+            addView(label("VOICE")); addView(locale); addView(speak); addView(sttAccurate)
             addView(label("MODE")); addView(study)
             addView(label("BRIEFINGS")); addView(briefings); addView(morning); addView(evening)
             addView(label("FLOATING ORB")); addView(overlay)

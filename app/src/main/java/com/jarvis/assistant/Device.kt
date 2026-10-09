@@ -1,6 +1,9 @@
 package com.jarvis.assistant
 
 import android.Manifest
+import android.app.Activity
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -16,6 +19,7 @@ import android.os.BatteryManager
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.telephony.SmsManager
+import android.telephony.TelephonyManager
 import android.view.KeyEvent
 import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
@@ -23,13 +27,16 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Direct control of the phone: contacts, SMS, calendar, media, volume, flashlight, battery, location. */
 class Device(private val ctx: Context) {
 
     companion object {
         val TYPES = setOf(
-            "call_contact", "send_sms", "calendar_add", "media", "volume", "flashlight", "battery", "where_am_i"
+            "call_contact", "send_sms", "calendar_add", "media", "volume", "flashlight", "battery", "where_am_i", "whatsapp"
         )
     }
 
@@ -43,6 +50,7 @@ class Device(private val ctx: Context) {
             when (type.lowercase()) {
                 "call_contact" -> callContact(arg)
                 "send_sms" -> sendSms(arg)
+                "whatsapp" -> { val p = arg.split("|", limit = 2); whatsapp(p.getOrElse(0) { "" }, p.getOrElse(1) { "" }) }
                 "calendar_add" -> calendarAdd(arg)
                 "media" -> media(arg)
                 "volume" -> volume(arg)
@@ -56,27 +64,82 @@ class Device(private val ctx: Context) {
         }
     }
 
-    // ---- contacts, calls, SMS ----
+    // ---- contacts, calls, SMS, WhatsApp ----
 
+    private fun norm(s: String): String {
+        val sb = StringBuilder()
+        for (ch in s.lowercase()) {
+            when {
+                ch in '\u064B'..'\u065F' || ch == '\u0670' || ch == '\u0640' -> {}
+                ch == 'أ' || ch == 'إ' || ch == 'آ' -> sb.append('ا')
+                ch == 'ى' -> sb.append('ي')
+                ch == 'ة' -> sb.append('ه')
+                ch.isLetterOrDigit() || ch == ' ' -> sb.append(ch)
+                else -> sb.append(' ')
+            }
+        }
+        return sb.toString().trim().replace(Regex("\\s+"), " ")
+    }
+
+    private fun lev(a: String, b: String): Int {
+        if (a == b) return 0
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            }
+            prev = cur
+        }
+        return prev[b.length]
+    }
+
+    private class Row(val name: String, val norm: String, val number: String, val mobile: Boolean)
+
+    /** Finds a contact by name (tolerant of case, Arabic spelling variants and small typos) or accepts a raw number. */
     private fun contact(query: String): Pair<String, String> {
         val q = query.trim()
         if (q.count { it.isDigit() } >= 5) return q to q.filter { it.isDigit() || it == '+' }
         need(Manifest.permission.READ_CONTACTS, "Contacts")
-        val cursor = ctx.contentResolver.query(
+
+        val rows = ArrayList<Row>()
+        ctx.contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?", arrayOf("%$q%"), null
-        )
-        var best: Pair<String, String>? = null
-        cursor?.use {
-            while (it.moveToNext()) {
+            arrayOf(
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ContactsContract.CommonDataKinds.Phone.TYPE
+            ), null, null, null
+        )?.use {
+            while (it.moveToNext() && rows.size < 6000) {
                 val name = it.getString(0) ?: continue
                 val number = it.getString(1) ?: continue
-                if (best == null || name.equals(q, ignoreCase = true)) best = name to number
-                if (name.equals(q, ignoreCase = true)) break
+                rows.add(Row(name, norm(name), number, it.getInt(2) == ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE))
             }
         }
-        return best ?: throw IllegalStateException("No contact named '$q'.")
+        if (rows.isEmpty()) throw IllegalStateException("I cannot see any contacts. Allow Contacts in Settings, Phone permissions.")
+
+        val nq = norm(q)
+        fun pick(list: List<Row>): Pair<String, String>? {
+            if (list.isEmpty()) return null
+            val first = list.first().name
+            val same = list.filter { it.name == first }
+            val r = same.firstOrNull { it.mobile } ?: same.first()
+            return r.name to r.number
+        }
+        pick(rows.filter { it.norm == nq })?.let { return it }
+        pick(rows.filter { it.norm.startsWith(nq) })?.let { return it }
+        pick(rows.filter { it.norm.contains(nq) })?.let { return it }
+        pick(rows.filter { r -> r.norm.split(" ").any { t -> t == nq || (nq.length >= 3 && t.startsWith(nq)) } })?.let { return it }
+
+        val scored = rows.map { r -> r to (listOf(lev(r.norm, nq)) + r.norm.split(" ").map { lev(it, nq) }).min() }
+            .sortedBy { it.second }
+        if (scored.isNotEmpty() && scored.first().second <= maxOf(1, nq.length / 4)) {
+            pick(rows.filter { it.name == scored.first().first.name })?.let { return it }
+        }
+        val close = scored.map { it.first.name }.distinct().take(3)
+        throw IllegalStateException("No contact matching '$q'." + if (close.isNotEmpty()) " Closest: ${close.joinToString(", ")}." else "")
     }
 
     private fun callContact(name: String): String {
@@ -90,14 +153,105 @@ class Device(private val ctx: Context) {
     @Suppress("DEPRECATION")
     private fun smsManager(): SmsManager = ctx.getSystemService(SmsManager::class.java) ?: SmsManager.getDefault()
 
-    private fun sendSms(arg: String): String {
+    /** Opens the phone's own messages app with the text ready, used when direct sending is not possible. */
+    private fun composer(display: String, number: String, text: String, why: String): String {
+        val i = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:" + android.net.Uri.encode(number)))
+            .putExtra("sms_body", text)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(i)
+        return "$why, so I opened your messages app for $display with the text ready. Press send."
+    }
+
+    fun sendSms(arg: String): String {
         val p = arg.split("|", limit = 2)
         if (p.size < 2 || p[1].isBlank()) return "I need a recipient and a message."
-        need(Manifest.permission.SEND_SMS, "SMS")
+        val text = p[1].trim()
         val (display, number) = contact(p[0])
-        val sm = smsManager()
-        sm.sendMultipartTextMessage(number, null, sm.divideMessage(p[1]), null, null)
-        return "SMS sent to $display."
+
+        if (!has(Manifest.permission.SEND_SMS)) {
+            return composer(display, number, text,
+                "SMS permission is off (if Android refuses it: App info, menu, Allow restricted settings)")
+        }
+        val action = "com.jarvis.assistant.SMS_SENT_" + System.nanoTime()
+        var receiver: BroadcastReceiver? = null
+        return try {
+            val sm = smsManager()
+            val parts = sm.divideMessage(text)
+            val latch = CountDownLatch(parts.size)
+            val failures = AtomicInteger(0)
+            val lastCode = AtomicInteger(0)
+            receiver = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    if (resultCode != Activity.RESULT_OK) { failures.incrementAndGet(); lastCode.set(resultCode) }
+                    latch.countDown()
+                }
+            }
+            ContextCompat.registerReceiver(ctx, receiver, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+            val sent = ArrayList<PendingIntent>()
+            for (k in parts.indices) {
+                sent.add(PendingIntent.getBroadcast(ctx, k, Intent(action).setPackage(ctx.packageName),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            }
+            sm.sendMultipartTextMessage(number, null, parts, sent, null)
+            val done = latch.await(20, TimeUnit.SECONDS)
+            when {
+                !done -> "SMS to $display was handed to the network but there is no confirmation yet. Check your messages app."
+                failures.get() > 0 -> composer(display, number, text, "The network refused the SMS (code ${lastCode.get()})")
+                else -> "SMS sent to $display."
+            }
+        } catch (e: SecurityException) {
+            composer(display, number, text, "Android blocked direct SMS for this app")
+        } catch (e: Exception) {
+            composer(display, number, text, "Sending failed (${e.message})")
+        } finally {
+            try { receiver?.let { ctx.unregisterReceiver(it) } } catch (e: Exception) { /* not registered */ }
+        }
+    }
+
+    private fun internationalNumber(raw: String): String {
+        var n = raw.filter { it.isDigit() || it == '+' }
+        if (n.startsWith("+")) return n.drop(1)
+        if (n.startsWith("00")) return n.drop(2)
+        if (n.startsWith("0")) {
+            val iso = try {
+                (ctx.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager).simCountryIso.uppercase(Locale.US)
+            } catch (e: Exception) { "" }
+            val code = mapOf(
+                "MA" to "212", "DZ" to "213", "TN" to "216", "EG" to "20", "SA" to "966", "AE" to "971", "FR" to "33",
+                "ES" to "34", "IT" to "39", "DE" to "49", "GB" to "44", "TR" to "90", "BE" to "32", "NL" to "31",
+                "US" to "1", "CA" to "1", "QA" to "974", "KW" to "965", "JO" to "962", "LB" to "961"
+            )[iso]
+            if (code != null) n = code + n.drop(1)
+        }
+        return n
+    }
+
+    /** Sends a WhatsApp message: opens the chat with the text filled in, then taps Send if the screen agent is enabled. */
+    fun whatsapp(contactName: String, text: String): String {
+        if (text.isBlank()) return "I need the message text."
+        val (display, raw) = contact(contactName)
+        val number = internationalNumber(raw)
+        val uri = android.net.Uri.parse("https://wa.me/$number?text=" + android.net.Uri.encode(text))
+        var opened = false
+        for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+            try {
+                ctx.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                opened = true
+                break
+            } catch (e: Exception) { /* try the next one */ }
+        }
+        if (!opened) return "WhatsApp is not installed on this phone."
+
+        val svc = JarvisAccessibilityService.instance
+            ?: return "Opened WhatsApp for $display with the message ready. Press send (enable the screen agent in Settings to send automatically)."
+        Thread.sleep(2800)
+        val clicked = svc.clickSend(
+            listOf("com.whatsapp:id/send", "com.whatsapp.w4b:id/send"),
+            listOf("send", "إرسال", "envoyer", "enviar"),
+            9000
+        )
+        return if (clicked) "WhatsApp message sent to $display."
+        else "Opened WhatsApp for $display with the message ready, but I could not find the Send button. Press send."
     }
 
     // ---- calendar ----

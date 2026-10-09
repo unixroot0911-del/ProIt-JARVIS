@@ -12,7 +12,7 @@ import java.util.Locale
 /** [spoken] is what Jarvis says aloud; [shown] is what appears on screen or in the chat. */
 data class Reply(val spoken: String, val shown: String, val failed: Boolean = false)
 
-/** The single pipeline every input goes through: voice, typed text, Telegram, briefings. */
+/** The single pipeline every input goes through: voice, typed text, chat windows, Telegram, briefings. */
 class Assistant(context: Context) {
     val appContext: Context = context.applicationContext
     private val prefs = Prefs(appContext)
@@ -28,6 +28,15 @@ class Assistant(context: Context) {
     }
 
     private fun clip(s: String, n: Int) = if (s.length <= n) s else s.take(n) + "..."
+
+    fun recentChat(n: Int): List<Turn> = memory.recentChat(n)
+
+    /** Records one utterance and returns its text, or null if nobody spoke. Throws a readable error on failure. */
+    suspend fun hear(voice: Voice): String? {
+        val wav = voice.record() ?: return null
+        val t = brain.transcribe(wav).trim()
+        return t.ifEmpty { null }
+    }
 
     fun buildContext(detailed: Boolean = false): String {
         val sb = StringBuilder()
@@ -61,7 +70,40 @@ class Assistant(context: Context) {
         return sb.toString()
     }
 
+    private suspend fun logChat(role: String, text: String) {
+        withContext(Dispatchers.IO) { memory.addChat(role, text) }
+        ChatBus.publish(role, text)
+    }
+
+    /** Handles one user message end to end and records it in the visible chat. */
     suspend fun handle(
+        text: String,
+        imageB64: String?,
+        confirm: suspend (String) -> Boolean,
+        onProgress: (String) -> Unit
+    ): Reply {
+        logChat("user", if (imageB64 != null) "[photo] $text" else text)
+
+        val progress: (String) -> Unit = { m ->
+            onProgress(m)
+            if (m.startsWith("AGENT:")) {
+                Engine.scope.launch(Dispatchers.IO) { memory.addChat("jarvis", m); ChatBus.publish("jarvis", m) }
+            } else {
+                ChatBus.publish("system", m)
+            }
+        }
+
+        val r = try {
+            handleInner(text, imageB64, confirm, progress)
+        } catch (e: Exception) {
+            val msg = e.message ?: "Something went wrong."
+            Reply(msg, msg, failed = true)
+        }
+        logChat("jarvis", r.shown)
+        return r
+    }
+
+    private suspend fun handleInner(
         text: String,
         imageB64: String?,
         confirm: suspend (String) -> Boolean,
@@ -98,6 +140,43 @@ class Assistant(context: Context) {
         return Reply(d.reply, shown)
     }
 
+    private fun startAgent(goal: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
+        if (Engine.agentJob?.isActive == true) return "An agent task is already running. Say 'stop agent' first."
+        val agent = ScreenAgent(appContext, brain)
+        Engine.agentJob = Engine.scope.launch {
+            val r = agent.run(goal, onProgress, confirm)
+            onProgress("AGENT: $r")
+        }
+        return "Agent started."
+    }
+
+    /** Sends a message in any app: WhatsApp and SMS directly, every other app through the screen agent. */
+    private suspend fun sendMessage(
+        arg: String,
+        confirm: suspend (String) -> Boolean,
+        onProgress: (String) -> Unit
+    ): String {
+        val p = arg.split("|", limit = 3)
+        val app = p.getOrElse(0) { "" }.trim()
+        val who: String
+        val msg: String
+        if (p.size >= 3) { who = p[1].trim(); msg = p[2].trim() }
+        else { who = p.getOrElse(0) { "" }.trim(); msg = p.getOrElse(1) { "" }.trim() }   // the brain forgot the app: plain SMS
+        if (who.isEmpty() || msg.isEmpty()) return "I need to know who to message and what to say."
+
+        val a = if (p.size >= 3) app.lowercase() else "sms"
+        return when {
+            a.contains("whatsapp") || a == "wa" || a == "واتساب" || a == "واتس" ->
+                withContext(Dispatchers.IO) { device.whatsapp(who, msg) }
+            a.isEmpty() || a.contains("sms") || a == "message" || a == "messages" || a == "text" || a == "رسالة" ->
+                withContext(Dispatchers.IO) { device.sendSms("$who|$msg") }
+            else -> startAgent(
+                "Open the $app app, find the chat or conversation with \"$who\", type this exact message: \"$msg\" and send it. " +
+                    "Then report that it was sent.", confirm, onProgress
+            )
+        }
+    }
+
     private suspend fun execute(
         type: String,
         arg: String,
@@ -112,6 +191,10 @@ class Assistant(context: Context) {
         return try {
             val t = type.lowercase()
             when {
+                t == "send_message" -> sendMessage(arg, confirm, onProgress)
+                t == "send_whatsapp" || t == "whatsapp_message" || t == "send_whatsapp_message" ->
+                    sendMessage(if (arg.count { it == '|' } >= 2) arg else "whatsapp|$arg", confirm, onProgress)
+                t == "send_sms" -> withContext(Dispatchers.IO) { device.sendSms(arg) }
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
                 t == "stop_agent" -> {
                     val job = Engine.agentJob
@@ -140,17 +223,7 @@ class Assistant(context: Context) {
                     prefs.mode = if (arg.trim().lowercase() == "study") "study" else "normal"
                     "Mode: ${prefs.mode}."
                 }
-                t == "run_agent" -> {
-                    if (Engine.agentJob?.isActive == true) "An agent task is already running. Say 'stop agent' first."
-                    else {
-                        val agent = ScreenAgent(appContext, brain)
-                        Engine.agentJob = Engine.scope.launch {
-                            val r = agent.run(arg, onProgress, confirm)
-                            onProgress("AGENT: $r")
-                        }
-                        "Agent started."
-                    }
-                }
+                t == "run_agent" -> startAgent(arg, confirm, onProgress)
                 else -> actions.run(type, arg)
             }
         } catch (e: Exception) {

@@ -9,7 +9,7 @@ data class Turn(val role: String, val text: String)
 data class Notif(val app: String, val pkg: String, val title: String, val text: String, val ts: Long)
 
 /** Long-term memory, all on-device: facts, conversation, notifications, money, habits, study notes. */
-class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 2) {
+class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 3) {
 
     companion object {
         @Volatile private var inst: Memory? = null
@@ -24,7 +24,7 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) createV2(db)
+        if (oldVersion < 3) createV2(db)
     }
 
     private fun createV2(db: SQLiteDatabase) {
@@ -32,6 +32,7 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         db.execSQL("CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, amount REAL, category TEXT, note TEXT, ts INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS habits (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, ts INTEGER)")
         db.execSQL("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, text TEXT, ts INTEGER)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS chat (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, text TEXT, ts INTEGER)")
     }
 
     // ---- facts and conversation ----
@@ -59,6 +60,23 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     fun recentTurns(limit: Int = 12): List<Turn> {
         val out = ArrayList<Turn>()
         readableDatabase.rawQuery("SELECT role, text FROM turns ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use {
+            while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
+        }
+        return out.reversed()
+    }
+
+    // ---- visible chat history ----
+
+    fun addChat(role: String, text: String) {
+        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()) }
+        val db = writableDatabase
+        db.insert("chat", null, cv)
+        db.execSQL("DELETE FROM chat WHERE id < (SELECT MAX(id) FROM chat) - 500")
+    }
+
+    fun recentChat(limit: Int): List<Turn> {
+        val out = ArrayList<Turn>()
+        readableDatabase.rawQuery("SELECT role, text FROM chat ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()
@@ -147,6 +165,6 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
 
     fun forgetAll() {
         val db = writableDatabase
-        for (t in listOf("facts", "turns", "notifs", "expenses", "habits", "notes")) db.execSQL("DELETE FROM $t")
+        for (t in listOf("facts", "turns", "notifs", "expenses", "habits", "notes", "chat")) db.execSQL("DELETE FROM $t")
     }
 }

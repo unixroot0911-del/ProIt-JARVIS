@@ -40,6 +40,11 @@ class Prefs(context: Context) {
         get() = str("mode", "normal")
         set(v) = put("mode", v)
 
+    /** Speech to text: false = Groq Whisper first (fast), true = Gemini first (more accurate with Darija, slower). */
+    var sttGeminiFirst: Boolean
+        get() = sp.getBoolean("stt_gemini_first", false)
+        set(v) = sp.edit().putBoolean("stt_gemini_first", v).apply()
+
     var briefingsOn: Boolean
         get() = sp.getBoolean("briefings_on", true)
         set(v) = sp.edit().putBoolean("briefings_on", v).apply()

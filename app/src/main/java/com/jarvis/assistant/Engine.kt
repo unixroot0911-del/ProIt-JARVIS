@@ -33,6 +33,14 @@ object Bus {
     }
 }
 
+/** Every chat line (user, jarvis, system) is published here so all chat windows stay in sync. */
+object ChatBus {
+    val listeners = CopyOnWriteArrayList<(String, String) -> Unit>()
+    fun publish(role: String, text: String) {
+        listeners.forEach { it(role, text) }
+    }
+}
+
 /** Asks the user a yes/no question, in the app if it is visible, otherwise over other apps. */
 object Confirmer {
     suspend fun ask(context: Context, message: String): Boolean = suspendCancellableCoroutine { cont ->
