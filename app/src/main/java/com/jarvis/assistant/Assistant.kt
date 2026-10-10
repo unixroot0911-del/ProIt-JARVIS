@@ -179,6 +179,7 @@ class Assistant(context: Context) {
 
     private fun startAgent(goal: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
         if (Engine.agentJob?.isActive == true) return "An agent task is already running. Say 'stop agent' first."
+        Engine.lastGoal = goal
         val agent = ScreenAgent(appContext, brain)
         Engine.agentJob = Engine.scope.launch {
             val r = agent.run(goal, onProgress, confirm)
@@ -268,6 +269,10 @@ class Assistant(context: Context) {
                     else -> { prefs.speakReplies = true; "Voice on." }
                 }
                 t == "download" -> Downloader.fetch(appContext, brain, arg, onProgress)
+                t == "update_self" -> Updater.check(appContext, true)
+                t == "check_update" -> Updater.check(appContext, false)
+                t == "self_check" -> Health.report(appContext)
+                t == "alert_on" || t == "alert_off" || t == "alert_list" -> Monitor.run(appContext, t, arg)
                 t == "screenshot" -> screenshotToTelegram()
                 t == "watch_start" -> Watcher.start(appContext, brain, arg)
                 t == "watch_stop" -> Watcher.stop()

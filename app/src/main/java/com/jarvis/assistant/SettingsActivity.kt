@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var pairInfo: TextView
+    private lateinit var statusView: TextView
     private lateinit var prefs: Prefs
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +62,7 @@ class SettingsActivity : AppCompatActivity() {
         val overlay = switch("Floating Jarvis: orb + chat window over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
+        statusView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f; text = Health.report(this@SettingsActivity) }
         val testResult = TextView(this).apply { setTextColor(Color.WHITE); setPadding(0, 16, 0, 16) }
         refreshPairInfo()
 
@@ -88,6 +91,7 @@ class SettingsActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 96, 48, 96)
 
+            addView(label("SETUP STATUS: what works and what is missing")); addView(statusView)
             addView(label("BRAIN 1: GEMINI")); addView(gemini)
             addView(label("BRAIN 2: GROQ (automatic fallback)")); addView(groq)
             addView(label("VOICE")); addView(locale); addView(speak); addView(force); addView(sttAccurate)
@@ -138,6 +142,20 @@ class SettingsActivity : AppCompatActivity() {
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 ), 7)
             })
+            addView(button("4. Battery: run unrestricted (keeps alarms, Telegram, watch alive)") {
+                try { startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) }
+                catch (e: Exception) { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+            })
+            addView(button("5. Exact alarm timing (Android 12+)") {
+                if (Build.VERSION.SDK_INT >= 31) {
+                    try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))) } catch (e: Exception) { /* not needed */ }
+                }
+            })
+            addView(label("UPDATES"))
+            addView(button("CHECK FOR UPDATE AND INSTALL") {
+                testResult.text = "Checking..."
+                lifecycleScope.launch { testResult.text = Updater.check(this@SettingsActivity, true) }
+            })
             addView(label("DIAGNOSTICS"))
             addView(button("TEST BRAINS") {
                 prefs.geminiKey = gemini.text.toString()
@@ -156,6 +174,11 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#05080F")); addView(col)
         })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        statusView.text = Health.report(this)
     }
 
     private fun refreshPairInfo() {

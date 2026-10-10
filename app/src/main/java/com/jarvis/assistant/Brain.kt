@@ -105,6 +105,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "open_creation" (arg = name of an app or game built earlier),
               "download" (arg = "what to download|optional direct link": searches the web for free, legal sources, follows download pages to the real file
                   and downloads it to the phone's Downloads folder: mods, maps, free apps, documents, music, books...),
+              "update_self" (arg = ""): downloads the newest Jarvis version and starts its installation; "check_update" (arg = ""),
+              "self_check" (arg = ""): reports which of Jarvis' own permissions, keys and services work or are missing,
+              "alert_on" (arg = words to watch in notifications; "a+b" needs both; Jarvis alerts quietly when one arrives), "alert_off" (arg = words or "all"), "alert_list" (arg = ""),
               "screenshot" (arg = ""): sends a screenshot of the phone screen to the user's Telegram,
               "pay" / "delete_file" (always need the user's confirmation).
           "remember": null or a short fact about the user worth storing long-term.
@@ -115,7 +118,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         look things up on the web (web_answer); remind them later (remind); talk hands-free (converse); operate any app (run_agent);
         build real playable games and tools on this phone (build_app); find and download free files from the web (download), for example
         community mods and maps ("download Maghreb map for ETS2 1.75" means issue download now, never "I can't fetch that"); show the screen
-        remotely (screenshot); read and answer notifications; send messages; call;
+        remotely (screenshot); update itself (update_self); diagnose itself (self_check: "why does X not work" starts there);
+        watch notifications for words and alert quietly (alert_on); read and answer notifications; send messages; call;
         photos via the LOOK button.
         "Watch me while I do X" means watch_start with X as the arg: confirm in one short line, do not refuse.
         Watching sees the phone screen, not the user's body or room; for that, tell them to tap LOOK for a photo.

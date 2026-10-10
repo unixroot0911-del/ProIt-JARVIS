@@ -36,6 +36,7 @@ object Offline {
     private val converseOff = rx("^(stop conversation|end conversation|conversation off|that'?s all|خلاص|كفى|بس|وقف المحادثة|سالينا)$")
     private val watchOn = rx("^(watch me|watch my screen|watch the screen|راقبني|راقب شاشتي|شوفني)$")
     private val watchOff = rx("^(stop watching|watch off|stop watch mode|وقف المراقبة|كفى مراقبة|بطل تراقبني)$")
+    private val cont = rx("^(continue|continue task|keep going|resume task|كمل المهمة|واصل|واصل المهمة)$")
     private val call = rx("^(?:call|اتصل ب|اتصل بـ|اتصل|عيط ل|عيط على|كلم)\\s+(.{2,25})$")
 
     fun parse(raw: String, actions: Actions): Decision? {
@@ -44,6 +45,8 @@ object Offline {
 
         if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", "")
 
+        if (cont.matches(t) && Engine.lastGoal.isNotEmpty() && Engine.agentJob?.isActive != true)
+            return d(t, "Continuing.", "أواصل.", "run_agent", Engine.lastGoal)
         if (watchOff.matches(t)) return d(t, "Watch mode off.", "تم إيقاف المراقبة.", "watch_stop", "")
         if (watchOn.matches(t)) return d(t, "Watching your screen.", "أراقب شاشتك الآن.", "watch_start",
             "Coach me: comment only when you notice something genuinely useful (a danger, a mistake, a better move, an answer)")

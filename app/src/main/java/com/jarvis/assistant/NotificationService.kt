@@ -75,6 +75,7 @@ class JarvisNotificationService : NotificationListenerService() {
                 sbn.packageName
             }
             Memory.get(applicationContext).addNotif(sbn.packageName, app, title, text)
+            Monitor.onNotification(applicationContext, app, title, text)
 
             n.actions?.forEach { a ->
                 val ris = a.remoteInputs

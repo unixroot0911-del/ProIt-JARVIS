@@ -23,6 +23,8 @@ object Engine {
     @Volatile var foreground: Activity? = null
     /** Hands-free conversation: after each answer Jarvis listens again. */
     @Volatile var converse = false
+    /** The last screen-agent goal, so "continue" can resume it. */
+    @Volatile var lastGoal = ""
     /** Lets background features (watch mode, reminders) speak through the service voice. */
     @Volatile var speaker: ((String) -> Unit)? = null
 }

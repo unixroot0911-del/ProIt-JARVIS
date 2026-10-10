@@ -43,4 +43,8 @@ jobs:
           }
           [ -f build.log ] && tail -n 400 build.log > "$RUNNER_TEMP/build.log" && publish buildlog "$RUNNER_TEMP/build.log"
           APK=app/build/outputs/apk/debug/app-debug.apk
-          if [ -f "$APK" ]; then cp "$APK" "$RUNNER_TEMP/jarvis.apk"; publish apk "$RUNNER_TEMP/jarvis.apk"; fi
+          if [ -f "$APK" ]; then
+            cp "$APK" "$RUNNER_TEMP/jarvis.apk"
+            grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts > "$RUNNER_TEMP/version.txt"
+            publish apk "$RUNNER_TEMP/jarvis.apk" "$RUNNER_TEMP/version.txt"
+          fi
