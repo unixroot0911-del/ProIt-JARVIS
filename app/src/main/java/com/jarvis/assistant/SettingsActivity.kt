@@ -151,6 +151,12 @@ class SettingsActivity : AppCompatActivity() {
                     try { startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))) } catch (e: Exception) { /* not needed */ }
                 }
             })
+            addView(button("6. All files access (so I can delete files you confirm)") {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    try { startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))) }
+                    catch (e: Exception) { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+                }
+            })
             addView(label("UPDATES"))
             addView(button("CHECK FOR UPDATE AND INSTALL") {
                 testResult.text = "Checking..."

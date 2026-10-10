@@ -111,7 +111,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "navigate" (arg = place or address: opens turn-by-turn navigation),
               "play_music" (arg = "song, artist or playlist|optional app"), "share" (arg = "app|text": opens that app's share screen with the text; blank app = system share menu),
               "screenshot" (arg = ""): sends a screenshot of the phone screen to the user's Telegram,
-              "pay" / "delete_file" (always need the user's confirmation).
+              "delete_file" (arg = the name of what to delete: a file, an app or game Jarvis built, or an installed app) and "pay" (arg = what to pay):
+                  both always ask the user for confirmation. When you issue one, your reply must only say that you are asking, never that it is done.
           "remember": null or a short fact about the user worth storing long-term.
         A "Phone context" block follows: current time, battery, calendar, recent notifications, today's spending and habits.
         Answer questions about messages, calendar or what the user missed ONLY from that block; never invent anything.

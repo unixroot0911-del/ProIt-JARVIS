@@ -43,6 +43,7 @@ object Health {
         line(Settings.canDrawOverlays(ctx), "Floating orb and chat over other apps", "press 'Allow display over other apps'")
         line(perm(Manifest.permission.READ_CONTACTS) && perm(Manifest.permission.SEND_SMS), "Contacts and SMS", "button 3 below")
         line(perm(Manifest.permission.READ_CALENDAR), "Calendar", "button 3 below")
+        line(Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager(), "All files access (deleting files you confirm)", "button 6 below")
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         line(Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms(), "Exact alarm timing", "button 5 below")
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager

@@ -5,7 +5,7 @@ package com.jarvis.assistant
  * which always need the user's explicit yes, whether Jarvis was asked by voice, text, Telegram or its own agent.
  */
 object Guard {
-    private val PROTECTED_ACTIONS = setOf("pay", "transfer", "purchase", "delete_file", "delete_account", "uninstall")
+    private val PROTECTED_ACTIONS = setOf("pay", "transfer", "purchase", "delete_file", "delete_account", "uninstall", "delete", "remove_file", "uninstall_app", "delete_app", "send_money", "pay_bill")
 
     private val RISKY_WORDS = listOf(
         "pay", "buy now", "purchase", "place order", "confirm order", "checkout", "check out",

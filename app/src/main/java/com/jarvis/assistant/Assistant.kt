@@ -152,9 +152,10 @@ class Assistant(context: Context) {
         }
         if (d.failed) return Reply(d.reply, d.reply, failed = true)
 
+        val guarded = d.actionType?.let { Guard.needsConfirmation(it) } == true
         withContext(Dispatchers.IO) {
             memory.addTurn("user", text)
-            memory.addTurn("model", d.reply)
+            memory.addTurn("model", if (guarded) "(asked the user to confirm ${d.actionType})" else d.reply)
             d.remember?.let { memory.addFact(it) }
         }
 
@@ -162,9 +163,40 @@ class Assistant(context: Context) {
         val type = d.actionType
         if (type != null) {
             val status = execute(type, d.actionArg ?: "", confirm, onProgress)
+            if (guarded && !status.isNullOrBlank()) return Reply(status, status)   // only the real outcome, never "it is done" before it is
             if (!status.isNullOrBlank()) shown = shown + "\n" + status
         }
         return Reply(d.reply, shown)
+    }
+
+    /**
+     * Payments and deletions: always ask first, and the question names the exact target. After a yes, Jarvis really does it:
+     * deletions through [Deleter]; payments by driving the screen itself (each final money tap asks again).
+     */
+    private suspend fun protectedFlow(
+        type: String,
+        arg: String,
+        confirm: suspend (String) -> Boolean,
+        onProgress: (String) -> Unit
+    ): String {
+        val t = type.lowercase()
+        if (t in setOf("delete_file", "delete", "remove_file", "uninstall", "uninstall_app", "delete_app")) {
+            val found = withContext(Dispatchers.IO) { Deleter.resolve(appContext, arg) }
+            if (found.isEmpty()) {
+                return "I found nothing named \"$arg\" to delete. I checked the apps and games I built, Downloads, Documents, Pictures, Movies, Music, DCIM and your installed apps."
+            }
+            val targets = if (t.contains("uninstall") || t == "delete_app") found.sortedByDescending { it.kind == "app" } else found
+            val x = targets.first()
+            val more = if (targets.size > 1) "\n\nOther matches (not touched): " + targets.drop(1).take(3).joinToString { it.label } else ""
+            if (!confirm("Delete ${x.label}?\n${x.detail}$more")) return "Cancelled. Nothing was deleted."
+            return withContext(Dispatchers.IO) { Deleter.perform(appContext, x) }
+        }
+        if (!confirm("Confirm: $type\n$arg")) return "Cancelled."
+        return startAgent(
+            "The user approved this request: $type $arg. Carry it out in the right app. " +
+                "Before the final tap that spends money or deletes something you will be asked again.",
+            confirm, onProgress
+        )
     }
 
     private suspend fun screenshotToTelegram(): String {
@@ -226,11 +258,7 @@ class Assistant(context: Context) {
         confirm: suspend (String) -> Boolean,
         onProgress: (String) -> Unit
     ): String? {
-        if (Guard.needsConfirmation(type)) {
-            return if (confirm("Confirm action: $type\n$arg"))
-                "Confirmed, but '$type' is not wired up in this version, so I did not do it. Do it yourself for now."
-            else "Cancelled."
-        }
+        if (Guard.needsConfirmation(type)) return protectedFlow(type, arg, confirm, onProgress)
         return try {
             val t = type.lowercase()
             when {
