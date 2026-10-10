@@ -9,6 +9,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+private val Scheduler_TYPES = setOf("set_alarm", "set_timer", "remind", "remind_at", "list_reminders", "cancel_reminder")
+
 /** [spoken] is what Jarvis says aloud; [shown] is what appears on screen or in the chat. */
 data class Reply(val spoken: String, val shown: String, val failed: Boolean = false)
 
@@ -43,6 +45,7 @@ class Assistant(context: Context) {
         sb.append("Now: ").append(SimpleDateFormat("EEEE yyyy-MM-dd HH:mm", Locale.ENGLISH).format(Date())).append('\n')
         sb.append("Battery: ").append(device.batteryLine()).append('\n')
         if (Watcher.active) sb.append("Watch mode: ON, watching the screen for: ").append(Watcher.topic).append('\n')
+        sb.append("Pending reminders and alarms: ").append(Scheduler.summary(appContext)).append('\n')
         Creations.names(appContext).take(8).let { if (it.isNotEmpty()) sb.append("Apps and games built so far: ").append(it.joinToString(", ")).append('\n') }
         sb.append("Calendar today: ").append(device.calendarToday()).append('\n')
 
@@ -230,7 +233,7 @@ class Assistant(context: Context) {
                 t == "watch_stop" -> Watcher.stop()
                 t == "look_screen" -> Watcher.see(appContext, brain, arg)
                 t == "web_answer" -> brain.search(arg)
-                t == "remind" -> Reminders.set(appContext, arg)
+                t in Scheduler_TYPES -> Scheduler.run(appContext, t, arg)
                 t == "build_app" -> Creations.build(appContext, brain, arg, onProgress)
                 t == "open_creation" -> Creations.openByName(appContext, arg)
                 t == "converse" -> {

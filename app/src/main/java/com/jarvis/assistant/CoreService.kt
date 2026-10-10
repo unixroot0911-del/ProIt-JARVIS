@@ -56,6 +56,7 @@ class CoreService : Service() {
         val v = voice ?: Voice(applicationContext, prefs).also { voice = it }
         if (chat == null) chat = FloatingChat(this, a, v)
         Engine.speaker = { text -> v.speak(text) }
+        Scheduler.rearmAll(this)
 
         if (botJob?.isActive != true) {
             botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }
