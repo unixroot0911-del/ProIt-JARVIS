@@ -105,6 +105,7 @@ class Assistant(context: Context) {
             Reply(msg, msg, failed = true)
         }
         logChat("jarvis", r.shown)
+        if (prefs.forceVoice) Engine.speaker?.invoke(r.spoken)
         return r
     }
 
@@ -229,6 +230,12 @@ class Assistant(context: Context) {
                     "Mode: ${prefs.mode}."
                 }
                 t == "run_agent" -> startAgent(arg, confirm, onProgress)
+                t == "set_voice" -> when (arg.trim().lowercase()) {
+                    "force", "force_on" -> { prefs.forceVoice = true; prefs.speakReplies = true; "Forced voice ON: I speak everything aloud, always." }
+                    "force_off" -> { prefs.forceVoice = false; "Forced voice off." }
+                    "off" -> { prefs.speakReplies = false; prefs.forceVoice = false; "Voice off. I will only write." }
+                    else -> { prefs.speakReplies = true; "Voice on." }
+                }
                 t == "watch_start" -> Watcher.start(appContext, brain, arg)
                 t == "watch_stop" -> Watcher.stop()
                 t == "look_screen" -> Watcher.see(appContext, brain, arg)

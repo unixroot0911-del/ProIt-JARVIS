@@ -179,7 +179,7 @@ class ChatActivity : AppCompatActivity() {
             }
             hideTyping()
             busy = false
-            if (speak && !r.failed) voice.speak(r.spoken)
+            if (speak && !r.failed && !Voice.forced(this@ChatActivity)) voice.speak(r.spoken)
         }
     }
 

@@ -99,6 +99,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "remind" (arg = "minutes from now|what to remind|repeat"; compute the minutes yourself from the current time; repeat optional: daily or weekly),
               "remind_at" (arg = "yyyy-MM-dd HH:mm|what to remind|repeat" or "HH:MM|what to remind|repeat"),
               "list_reminders" (arg = ""), "cancel_reminder" (arg = words from the reminder, or "all"),
+              "set_voice" (arg = "force" to speak everything aloud always, "force_off", "on" or "off"),
               "converse" (arg = "on" or "off": hands-free spoken conversation where Jarvis listens again after every answer),
               "build_app" (arg = "name|full description, or the change to make": Jarvis writes a complete playable game or tool and opens it on the phone),
               "open_creation" (arg = name of an app or game built earlier),

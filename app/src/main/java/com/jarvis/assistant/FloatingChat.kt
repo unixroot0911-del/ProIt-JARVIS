@@ -235,7 +235,7 @@ class FloatingChat(
             }
             hideTyping()
             busy = false
-            if (speak && !r.failed) voice.speak(r.spoken)
+            if (speak && !r.failed && !Voice.forced(ctx)) voice.speak(r.spoken)
         }
     }
 

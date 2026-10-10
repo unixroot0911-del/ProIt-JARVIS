@@ -61,6 +61,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("overlay_on", false)
         set(v) = sp.edit().putBoolean("overlay_on", v).apply()
 
+    /** Force voice: Jarvis speaks everything aloud, always, with no quiet-mode, headphone or night restrictions. */
+    var forceVoice: Boolean
+        get() = sp.getBoolean("force_voice", false)
+        set(v) = sp.edit().putBoolean("force_voice", v).apply()
+
     /** Watch mode: seconds between looks, and auto-stop after this many minutes. */
     var watchSeconds: Int
         get() = sp.getInt("watch_s", 10)

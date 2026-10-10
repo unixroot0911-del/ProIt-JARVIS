@@ -13,6 +13,8 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.VibrationEffect
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 import android.os.Vibrator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -235,6 +237,15 @@ object Alerts {
         return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in types }
     }
 
+    /** Speaks even when Jarvis was not running: wakes the core service first, then talks. */
+    suspend fun speakForced(ctx: Context, text: String) {
+        if (Engine.speaker == null) {
+            try { ContextCompat.startForegroundService(ctx, Intent(ctx, CoreService::class.java)) } catch (e: Exception) { /* not allowed right now */ }
+            repeat(12) { if (Engine.speaker == null) delay(300) }
+        }
+        Engine.speaker?.invoke(text)
+    }
+
     suspend fun deliver(ctx: Context, d: Due, late: Boolean) {
         val text = if (late) "${d.text} (missed earlier)" else d.text
         val wake = d.kind == "wake"
@@ -274,7 +285,8 @@ object Alerts {
             } catch (e: Exception) { /* no vibrator */ }
         }
 
-        if (headset(ctx)) Engine.speaker?.invoke(if (wake) "Time to wake up. ${d.text}" else text)
+        val spoken = if (wake) "Time to wake up. ${d.text}" else text
+        if (Prefs(ctx).forceVoice) speakForced(ctx, spoken) else if (headset(ctx)) Engine.speaker?.invoke(spoken)
 
         ChatBus.publish("jarvis", "Reminder: $text")
         withContext(Dispatchers.IO) {

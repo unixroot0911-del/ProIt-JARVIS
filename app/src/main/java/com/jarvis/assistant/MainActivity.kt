@@ -274,7 +274,7 @@ class MainActivity : AppCompatActivity() {
             transcript.text = r.shown
             if (!r.failed) {
                 setState(OrbState.SPEAKING, "SPEAKING")
-                voice.speak(r.spoken)
+                if (!Voice.forced(this@MainActivity)) voice.speak(r.spoken)
                 if (Engine.converse) voice.awaitSpeech()
             } else {
                 Engine.converse = false

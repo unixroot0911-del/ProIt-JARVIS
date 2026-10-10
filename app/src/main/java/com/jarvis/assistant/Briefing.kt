@@ -69,6 +69,7 @@ class BriefingWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
             "Briefing failed: ${e.message}"
         }
         Briefings.post(applicationContext, kind, text)
+        if (prefs.forceVoice) Alerts.speakForced(applicationContext, text.take(500))
         withContext(Dispatchers.IO) { Telegram.sendToOwner(prefs, text) }
         if (prefs.briefingsOn) {
             Briefings.enqueue(applicationContext, kind, if (kind == "morning") prefs.morningTime else prefs.eveningTime)
