@@ -39,6 +39,37 @@ object Telegram {
     fun getUpdates(token: String, offset: Long): String =
         call(token, "getUpdates?timeout=25&offset=$offset", null, 40000)
 
+    /** Sends a JPEG to the paired owner chat. Returns false if Telegram is not set up or the send failed. */
+    fun sendPhotoToOwner(prefs: Prefs, jpeg: ByteArray, caption: String): Boolean {
+        val token = prefs.telegramToken
+        val chat = prefs.telegramChatId
+        if (token.isEmpty() || chat.isEmpty()) return false
+        val boundary = "----jarvis" + System.currentTimeMillis()
+        val out = java.io.ByteArrayOutputStream()
+        fun field(n: String, v: String) =
+            out.write("--$boundary\r\nContent-Disposition: form-data; name=\"$n\"\r\n\r\n$v\r\n".toByteArray())
+        field("chat_id", chat)
+        field("caption", caption)
+        out.write(("--$boundary\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"screen.jpg\"\r\n" +
+            "Content-Type: image/jpeg\r\n\r\n").toByteArray())
+        out.write(jpeg)
+        out.write("\r\n--$boundary--\r\n".toByteArray())
+        val c = URL("https://api.telegram.org/bot$token/sendPhoto").openConnection() as HttpURLConnection
+        return try {
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.connectTimeout = 15000
+            c.readTimeout = 30000
+            c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            c.outputStream.use { it.write(out.toByteArray()) }
+            c.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            c.disconnect()
+        }
+    }
+
     /** Sends to the paired owner chat, silently doing nothing if Telegram is not set up. */
     fun sendToOwner(prefs: Prefs, text: String) {
         val token = prefs.telegramToken

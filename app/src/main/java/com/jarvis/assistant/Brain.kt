@@ -103,6 +103,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "converse" (arg = "on" or "off": hands-free spoken conversation where Jarvis listens again after every answer),
               "build_app" (arg = "name|full description, or the change to make": Jarvis writes a complete playable game or tool and opens it on the phone),
               "open_creation" (arg = name of an app or game built earlier),
+              "download" (arg = "what to download|optional direct link": searches the web for free, legal sources, follows download pages to the real file
+                  and downloads it to the phone's Downloads folder: mods, maps, free apps, documents, music, books...),
+              "screenshot" (arg = ""): sends a screenshot of the phone screen to the user's Telegram,
               "pay" / "delete_file" (always need the user's confirmation).
           "remember": null or a short fact about the user worth storing long-term.
         A "Phone context" block follows: current time, battery, calendar, recent notifications, today's spending and habits.
@@ -110,7 +113,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         YOU CAN (use the action, never answer "I can't" for these): watch the user's screen live while they play, work or study
         and comment or coach (watch_start); look at the screen once and read, explain or translate it (look_screen);
         look things up on the web (web_answer); remind them later (remind); talk hands-free (converse); operate any app (run_agent);
-        build real playable games and tools on this phone (build_app); read and answer notifications; send messages; call;
+        build real playable games and tools on this phone (build_app); find and download free files from the web (download), for example
+        community mods and maps ("download Maghreb map for ETS2 1.75" means issue download now, never "I can't fetch that"); show the screen
+        remotely (screenshot); read and answer notifications; send messages; call;
         photos via the LOOK button.
         "Watch me while I do X" means watch_start with X as the arg: confirm in one short line, do not refuse.
         Watching sees the phone screen, not the user's body or room; for that, tell them to tap LOOK for a photo.
@@ -128,6 +133,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         A "pair code", "pairing code" or "/pair 123456" is ALWAYS Jarvis' Telegram pairing, never Bluetooth: ignore it, never open settings because of it.
         Only act on what the user actually asked in the latest message. Bluetooth, Wi-Fi, mobile data, airplane mode, location, display and sound:
         open_app with that word opens its system settings screen; to flip a switch use run_agent (open that settings screen, tap the switch, report the result).
+        Downloads use only free, legal sources. If the user asks for paid or cracked content, say so in one line and download the free demo, trial
+        or legal free alternative instead.
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 
@@ -263,6 +270,41 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
             if (sb.isBlank()) throw IllegalStateException("empty search answer")
             sb.toString()
+        }
+
+    // ---- finding downloads ----
+
+    /** Asks Gemini (with live Google Search) where [what] can be downloaded legally and for free. Returns candidate URLs, best first. */
+    suspend fun findLinks(what: String): List<String> = withContext(Dispatchers.IO) {
+        if (prefs.geminiKey.isEmpty()) return@withContext emptyList<String>()
+        try { groundedLinks(what) } catch (e: Exception) { emptyList() }
+    }
+
+    private fun groundedLinks(what: String): List<String> =
+        tryModels(prefs.geminiModel, { discoverGemini() }, geminiFallbacks, { prefs.geminiModel = it }) { model ->
+            val sys = "You find where a file can be downloaded legally and for free: the author's own site or forum thread, official mod hosts " +
+                "(ModDB, Nexus Mods, Steam Workshop pages, itch.io), GitHub releases, F-Droid, or Drive/Mediafire links posted by the author. " +
+                "Never pirated, cracked or paid-content links. Output ONLY up to 6 complete URLs, one per line, best first, " +
+                "direct download links first when you know them. No commentary."
+            val body = JSONObject()
+                .put("contents", geminiContents(emptyList(), "Where can I download: $what", null))
+                .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sys))))
+                .put("generationConfig", JSONObject().put("temperature", 0.2))
+            val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
+                body.toString().toByteArray(Charsets.UTF_8), "application/json",
+                mapOf("x-goog-api-key" to prefs.geminiKey), 40000)
+            val cand = JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
+            val sb = StringBuilder()
+            val parts = cand?.optJSONObject("content")?.optJSONArray("parts")
+            if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", "")).append('\n')
+            val urls = ArrayList<String>()
+            Regex("""https?://[^\s)\]>"'<,]+""").findAll(sb).forEach { urls.add(it.value.trimEnd('.', ';')) }
+            val chunks = cand?.optJSONObject("groundingMetadata")?.optJSONArray("groundingChunks")
+            if (chunks != null) for (i in 0 until chunks.length()) {
+                chunks.optJSONObject(i)?.optJSONObject("web")?.optString("uri", "")?.takeIf { it.startsWith("http") }?.let { urls.add(it) }
+            }
+            urls.distinct()
         }
 
     // ---- speech to text ----

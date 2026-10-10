@@ -134,7 +134,17 @@ class Assistant(context: Context) {
 
         // 2. Everything else goes to the brain.
         val ctx = withContext(Dispatchers.IO) { buildContext() }
-        val d = brain.think(text, ctx, imageB64)
+        var d = brain.think(text, ctx, imageB64)
+        if (!d.failed && d.actionType == null && refusal.containsMatchIn(d.reply)) {
+            // A bare "I can't" is never the final answer: make the brain find a workable route and act.
+            val d2 = brain.think(
+                text + "\n\n[SYSTEM NOTE: your draft answer was a refusal or a dead end: \"" + d.reply.take(160) + "\". Do not refuse. " +
+                    "Pick the closest workable route with your actions (download, web_answer, run_agent, build_app, open_url, remind...) and issue it now. " +
+                    "Decline only if it is genuinely harmful or illegal, and then offer the legal alternative and do that instead.]",
+                ctx, imageB64
+            )
+            if (!d2.failed && (d2.actionType != null || !refusal.containsMatchIn(d2.reply))) d = d2
+        }
         if (d.failed) return Reply(d.reply, d.reply, failed = true)
 
         withContext(Dispatchers.IO) {
@@ -151,6 +161,21 @@ class Assistant(context: Context) {
         }
         return Reply(d.reply, shown)
     }
+
+    private suspend fun screenshotToTelegram(): String {
+        val svc = JarvisAccessibilityService.instance ?: return "That needs the Jarvis screen agent: Settings > 2. Accessibility."
+        val bmp = svc.screenshot() ?: return "The screenshot was blocked (protected screen, locked phone, or Android 10 or older)."
+        val out = java.io.ByteArrayOutputStream()
+        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
+        val sent = withContext(Dispatchers.IO) { Telegram.sendPhotoToOwner(prefs, out.toByteArray(), "Your screen right now") }
+        return if (sent) "Screenshot sent to your Telegram." else "I took the screenshot but Telegram is not paired yet."
+    }
+
+    private val refusal = Regex(
+        "(i can'?t|i cannot|i can not|i'm unable|i am unable|unable to|can'?t help|can'?t assist|can'?t fetch|can'?t do that|won'?t be able|not able to)" +
+            "|لا أستطيع|لا استطيع|لا يمكنني|ما نقدرش|ما كنقدرش|ماقدرش",
+        RegexOption.IGNORE_CASE
+    )
 
     private fun startAgent(goal: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
         if (Engine.agentJob?.isActive == true) return "An agent task is already running. Say 'stop agent' first."
@@ -242,6 +267,8 @@ class Assistant(context: Context) {
                     "off" -> { prefs.speakReplies = false; prefs.forceVoice = false; "Voice off. I will only write." }
                     else -> { prefs.speakReplies = true; "Voice on." }
                 }
+                t == "download" -> Downloader.fetch(appContext, brain, arg, onProgress)
+                t == "screenshot" -> screenshotToTelegram()
                 t == "watch_start" -> Watcher.start(appContext, brain, arg)
                 t == "watch_stop" -> Watcher.stop()
                 t == "look_screen" -> Watcher.see(appContext, brain, arg)
