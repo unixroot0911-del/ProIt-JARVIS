@@ -40,7 +40,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var transcript: TextView
     private lateinit var input: EditText
 
-    private var busy = false
+    private var busy = false          // voice pipeline only
+    private var inflight = 0           // typing is never blocked while Jarvis works
     private var pendingImage: String? = null
     private val photoFile: File by lazy { File(cacheDir, "images").apply { mkdirs() }.let { File(it, "shot.jpg") } }
 
@@ -172,9 +173,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendTyped() {
         val t = input.text.toString().trim()
-        if (t.isEmpty() || busy) return
+        if (t.isEmpty()) return
         input.setText("")
-        busy = true
         transcript.text = t
         process(t)
     }
@@ -262,6 +262,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun process(userText: String) {
+        inflight++
         setState(OrbState.THINKING, "THINKING")
         val img = pendingImage
         pendingImage = null
@@ -279,9 +280,13 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Engine.converse = false
             }
-            busy = false
-            setState(OrbState.IDLE, "ONLINE")
-            if (Engine.converse) startListening()
+            inflight--
+            if (inflight <= 0) {
+                inflight = 0
+                busy = false
+                setState(OrbState.IDLE, "ONLINE")
+            }
+            if (Engine.converse && inflight == 0) startListening()
         }
     }
 

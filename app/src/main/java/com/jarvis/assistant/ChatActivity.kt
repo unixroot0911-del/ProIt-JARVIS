@@ -31,7 +31,8 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var input: EditText
     private lateinit var mic: Button
 
-    private var busy = false
+    private var busy = false          // microphone only
+    private var inflight = 0           // typing is never blocked while Jarvis works
     private var listening = false
     private var typing: View? = null
     private val maxBubble by lazy { (resources.displayMetrics.widthPixels * 0.78f).toInt() }
@@ -168,8 +169,7 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun submit(text: String, speak: Boolean) {
-        if (busy) return
-        busy = true
+        inflight++
         showTyping()
         lifecycleScope.launch {
             val r = try {
@@ -177,8 +177,8 @@ class ChatActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Reply(e.message ?: "Error", e.message ?: "Error", failed = true)
             }
-            hideTyping()
-            busy = false
+            inflight--
+            if (inflight <= 0) { inflight = 0; hideTyping() }
             if (speak && !r.failed && !Voice.forced(this@ChatActivity)) voice.speak(r.spoken)
         }
     }

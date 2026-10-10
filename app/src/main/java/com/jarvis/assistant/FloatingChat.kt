@@ -39,7 +39,8 @@ class FloatingChat(
     private var input: EditText? = null
     private var micChip: TextView? = null
     private var typing: View? = null
-    private var busy = false
+    private var busy = false          // microphone only
+    private var inflight = 0           // messages being answered right now; typing is never blocked
     private var listening = false
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
@@ -47,7 +48,7 @@ class FloatingChat(
 
     private val sub: (String, String) -> Unit = { role, text ->
         ui.post {
-            if (role == "jarvis") hideTyping()
+            if (role == "jarvis" && inflight == 0) hideTyping()
             add(role, text)
         }
     }
@@ -77,11 +78,14 @@ class FloatingChat(
             setStroke(dp(1), cyan)
         }
         panel.setPadding(dp(10), dp(6), dp(10), dp(10))
+        // a tap outside gives the keyboard and the focus back to the app underneath
+        panel.setOnTouchListener { _, e -> if (e.action == MotionEvent.ACTION_OUTSIDE) releaseKeyboard(); false }
 
         val params = WindowManager.LayoutParams(
             width, height,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -142,10 +146,14 @@ class FloatingChat(
             // the window is non-focusable so it never steals the keyboard from the app below; focus it only when typing
             setOnTouchListener { v, e ->
                 if (e.action == MotionEvent.ACTION_DOWN) {
-                    setFocusable(true)
-                    v.post {
-                        v.requestFocus()
-                        (ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(v, 0)
+                    this@FloatingChat.setWindowFocusable(true)   // not View.setFocusable: this is the overlay window's flag
+                    val imm = ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                    // the window needs a moment to become focused before the keyboard can attach: try a few times
+                    for (wait in longArrayOf(80, 250, 600)) {
+                        v.postDelayed({
+                            if (!v.hasFocus()) v.requestFocus()
+                            imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        }, wait)
                     }
                 }
                 false
@@ -181,7 +189,7 @@ class FloatingChat(
         root = null; lp = null; list = null; scroll = null; input = null; micChip = null; typing = null
     }
 
-    private fun setFocusable(on: Boolean) {
+    private fun setWindowFocusable(on: Boolean) {
         val p = lp ?: return
         val r = root ?: return
         p.flags = if (on) p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
@@ -191,7 +199,7 @@ class FloatingChat(
 
     private fun releaseKeyboard() {
         input?.let { (ctx.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(it.windowToken, 0) }
-        setFocusable(false)
+        setWindowFocusable(false)
     }
 
     private fun add(role: String, text: String) {
@@ -224,8 +232,7 @@ class FloatingChat(
     }
 
     private fun submit(text: String, speak: Boolean) {
-        if (busy) return
-        busy = true
+        inflight++
         showTyping()
         Engine.scope.launch(Dispatchers.Main) {
             val r = try {
@@ -233,8 +240,8 @@ class FloatingChat(
             } catch (e: Exception) {
                 Reply(e.message ?: "Error", e.message ?: "Error", failed = true)
             }
-            hideTyping()
-            busy = false
+            inflight--
+            if (inflight <= 0) { inflight = 0; hideTyping() }
             if (speak && !r.failed && !Voice.forced(ctx)) voice.speak(r.spoken)
         }
     }
