@@ -108,6 +108,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "update_self" (arg = ""): downloads the newest Jarvis version and starts its installation; "check_update" (arg = ""),
               "self_check" (arg = ""): reports which of Jarvis' own permissions, keys and services work or are missing,
               "alert_on" (arg = words to watch in notifications; "a+b" needs both; Jarvis alerts quietly when one arrives), "alert_off" (arg = words or "all"), "alert_list" (arg = ""),
+              "navigate" (arg = place or address: opens turn-by-turn navigation),
+              "play_music" (arg = "song, artist or playlist|optional app"), "share" (arg = "app|text": opens that app's share screen with the text; blank app = system share menu),
               "screenshot" (arg = ""): sends a screenshot of the phone screen to the user's Telegram,
               "pay" / "delete_file" (always need the user's confirmation).
           "remember": null or a short fact about the user worth storing long-term.
@@ -139,6 +141,12 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         open_app with that word opens its system settings screen; to flip a switch use run_agent (open that settings screen, tap the switch, report the result).
         Downloads use only free, legal sources. If the user asks for paid or cracked content, say so in one line and download the free demo, trial
         or legal free alternative instead.
+        UNDERSTANDING: interpret by INTENT, never by the literal words and never only by the examples you have seen. The user types fast, with typos, slang,
+        Arabic, Darija, French and English mixed, and spells names by sound. A word that resembles an installed app (see "Installed apps" and "Apps the user's
+        words resemble" in the phone context) IS that app; one that resembles a contact IS that contact. "let's X", "X?", "lets go X", "يلا X", "play X", "I want X"
+        with an installed app or game X means open it. The same reasoning covers every family of request: apps and games, contacts, songs and artists (play_music),
+        places (navigate), websites, files, settings, reminders, notifications. Do not ask which app or what content when the phone context lets you guess: act on
+        the best guess and say in a few words what you did. Ask ONE short question only when two readings would have different irreversible effects (sending, paying, deleting).
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 

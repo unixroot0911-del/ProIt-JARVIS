@@ -31,7 +31,7 @@ object Offline {
     private val stopAgent = rx("^(stop agent|stop the agent|وقف الوكيل|أوقف الوكيل|اوقف الوكيل)$")
     private val timer = rx("^(?:set (?:a )?)?(?:timer|مؤقت|تايمر)(?: for| ل| ديال)? ?(\\d{1,4}) ?(seconds?|secs?|ثانية|ثواني|ثانيه|minutes?|mins?|دقيقة|دقائق|دقايق|دقيقه|hours?|ساعة|ساعات|ساعه)$")
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
-    private val open = rx("^(?:open|launch|start|افتح|حل|شغل)\\s+(.{2,25})$")
+    private val open = rx("^(?:open|launch|start|play|run|go to|let'?s(?: play| open| start| go| run| go to)?|lets(?: play| open| start| go)?|افتح|حل|شغل|العب|يلا|هيا|خلينا|نلعبو|لنلعب|ندير)\\s+(.{2,25})$")
     private val converseOn = rx("^(conversation mode|talk to me|let'?s talk|hands.?free( mode)?|وضع المحادثة|كلمني|تكلم معي|هضر معايا)$")
     private val converseOff = rx("^(stop conversation|end conversation|conversation off|that'?s all|خلاص|كفى|بس|وقف المحادثة|سالينا)$")
     private val watchOn = rx("^(watch me|watch my screen|watch the screen|راقبني|راقب شاشتي|شوفني)$")
@@ -91,6 +91,9 @@ object Offline {
         open.find(t)?.let { m ->
             val name = m.groupValues[1].trim()
             if (actions.findApp(name) != null || actions.settingFor(name) != null) return d(t, "Opening $name.", "جاري فتح $name.", "open_app", name)
+        }
+        if (t.split(" ").size <= 2 && t.length >= 4 && actions.findAppLoose(t) != null) {
+            return d(t, "Opening $t.", "جاري فتح $t.", "open_app", t)
         }
         return null
     }

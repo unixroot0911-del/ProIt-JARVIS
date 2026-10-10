@@ -133,12 +133,17 @@ class Assistant(context: Context) {
         }
 
         // 2. Everything else goes to the brain.
-        val ctx = withContext(Dispatchers.IO) { buildContext() }
+        val mentions = withContext(Dispatchers.IO) { actions.mentions(text) }
+        val ctx = withContext(Dispatchers.IO) {
+            buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
+                (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "")
+        }
         var d = brain.think(text, ctx, imageB64)
-        if (!d.failed && d.actionType == null && refusal.containsMatchIn(d.reply)) {
+        val question = d.reply.trim().let { it.endsWith("?") || it.endsWith("؟") }
+        if (!d.failed && d.actionType == null && (refusal.containsMatchIn(d.reply) || (question && mentions.isNotEmpty()))) {
             // A bare "I can't" is never the final answer: make the brain find a workable route and act.
             val d2 = brain.think(
-                text + "\n\n[SYSTEM NOTE: your draft answer was a refusal or a dead end: \"" + d.reply.take(160) + "\". Do not refuse. " +
+                text + "\n\n[SYSTEM NOTE: your draft answer was a refusal or a dead end: \"" + d.reply.take(160) + "\". Do not refuse, and do not ask what you can work out yourself from the phone context (installed apps, contacts, notifications, history): decide and act. " +
                     "Pick the closest workable route with your actions (download, web_answer, run_agent, build_app, open_url, remind...) and issue it now. " +
                     "Decline only if it is genuinely harmful or illegal, and then offer the legal alternative and do that instead.]",
                 ctx, imageB64

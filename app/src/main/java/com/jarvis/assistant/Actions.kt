@@ -3,7 +3,9 @@ package com.jarvis.assistant
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.app.SearchManager
 import android.provider.AlarmClock
+import android.provider.MediaStore
 
 /** Actions that need only standard Android intents. Direct phone control lives in Device.kt. */
 class Actions(private val context: Context) {
@@ -18,11 +20,112 @@ class Actions(private val context: Context) {
                 "web_search" -> launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(arg))))
                 "open_url" -> launch(Intent(Intent.ACTION_VIEW, Uri.parse(if (arg.startsWith("http")) arg else "https://$arg")))
                 "call" -> launch(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(arg))))
+                "navigate" -> navigate(arg)
+                "play_music" -> playMusic(arg)
+                "share" -> share(arg)
                 else -> "Action '$type' is not supported yet."
             }
         } catch (e: Exception) {
             "Action failed: ${e.message}"
         }
+    }
+
+    companion object {
+        @Volatile private var cache: List<Pair<String, String>> = emptyList()
+        @Volatile private var cacheAt = 0L
+    }
+
+    /** (label, package) of every launchable app, cached for a minute. */
+    fun installed(): List<Pair<String, String>> {
+        if (cache.isNotEmpty() && System.currentTimeMillis() - cacheAt < 60_000L) return cache
+        val pm = context.packageManager
+        val l = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+            .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+            .distinctBy { it.first }
+            .sortedBy { it.first.lowercase() }
+        cache = l
+        cacheAt = System.currentTimeMillis()
+        return l
+    }
+
+    fun installedLabels(max: Int = 120): List<String> = installed().map { it.first }.take(max)
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun edit(a: String, b: String): Int {
+        val d = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = d[0]
+            d[0] = i
+            for (j in 1..b.length) {
+                val tmp = d[j]
+                d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return d[b.length]
+    }
+
+    /** Typos, dropped letters and partial names count as the same word: "monopost" is "Monoposto". */
+    fun similar(a: String, b: String): Boolean {
+        val x = norm(a)
+        val y = norm(b)
+        if (x.length < 3 || y.length < 3) return x == y
+        if (x == y) return true
+        val s = if (x.length <= y.length) x else y
+        val l = if (x.length <= y.length) y else x
+        if (s.length >= 4 && l.contains(s) && s.length * 10 >= l.length * 5) return true
+        return x.length >= 4 && y.length >= 4 && edit(x, y) <= maxOf(1, minOf(x.length, y.length) / 5)
+    }
+
+    /** Installed apps whose names resemble words or word pairs in [text]. */
+    fun mentions(text: String): List<String> {
+        val words = text.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+        val grams = (words + words.zipWithNext { a, b -> "$a $b" }).filter { norm(it).length >= 4 }
+        val apps = installed()
+        val out = LinkedHashSet<String>()
+        for (g in grams) for ((label, _) in apps) if (similar(g, label)) out.add(label)
+        return out.take(5).toList()
+    }
+
+    /** A message that is just an app's name (maybe misspelled) opens that app. */
+    fun findAppLoose(text: String): String? =
+        installed().firstOrNull { similar(text, it.first) }?.second
+
+    private fun playMusic(arg: String): String? {
+        val p = arg.split("|", limit = 2)
+        val q = p[0].trim()
+        val app = p.getOrElse(1) { "" }.trim()
+        val i = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            .putExtra(SearchManager.QUERY, q)
+        if (app.isNotEmpty()) findApp(app)?.let { i.setPackage(it) }
+        return try {
+            launch(i)
+        } catch (e: Exception) {
+            launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))))
+        }
+    }
+
+    private fun navigate(place: String): String? {
+        return try {
+            launch(Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(place))).setPackage("com.google.android.apps.maps"))
+        } catch (e: Exception) {
+            launch(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(place))))
+        }
+    }
+
+    /** Opens an app's share screen with the text ready ("post this to Telegram"); blank app opens the system share menu. */
+    private fun share(arg: String): String? {
+        val p = arg.split("|", limit = 2)
+        val app = if (p.size > 1) p[0].trim() else ""
+        val text = if (p.size > 1) p[1] else p[0]
+        val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        if (app.isEmpty()) return launch(Intent.createChooser(i, "Share"))
+        val pkg = findApp(app) ?: return "I could not find an app called $app."
+        i.setPackage(pkg)
+        launch(i)
+        return "Opened the share screen of $app with your text ready. Pick the chat and tap send."
     }
 
     private fun launch(i: Intent): String? {
@@ -44,6 +147,7 @@ class Actions(private val context: Context) {
         return apps.firstOrNull { it.first == nn }?.second
             ?: apps.firstOrNull { it.first.contains(nn) }?.second
             ?: apps.firstOrNull { it.first.length >= 3 && nn.contains(it.first) }?.second
+            ?: installed().firstOrNull { similar(n, it.first) }?.second
     }
 
     /** Android settings screens people ask for by name: bluetooth, wifi, location... in English, Arabic and Darija. */
