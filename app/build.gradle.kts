@@ -11,11 +11,25 @@ android {
         applicationId = "com.jarvis.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.6.7"
+        versionCode = 14
+        versionName = "0.6.8"
+    }
+
+    // One fixed signing key for every build, so a new APK installs OVER the old one and keeps all data.
+    signingConfigs {
+        create("jarvis") {
+            storeFile = file("jarvis.keystore")
+            storePassword = "jarvis-keystore-pass"
+            keyAlias = "jarvis"
+            keyPassword = "jarvis-keystore-pass"
+            storeType = "pkcs12"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("jarvis")
+        }
         release {
             isMinifyEnabled = false
         }
