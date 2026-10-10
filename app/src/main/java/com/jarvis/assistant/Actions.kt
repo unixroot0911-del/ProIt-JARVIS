@@ -34,10 +34,16 @@ class Actions(private val context: Context) {
     /** Package name of the launchable app whose label contains [name], or null. */
     fun findApp(name: String): String? {
         val pm = context.packageManager
-        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return pm.queryIntentActivities(launcher, 0)
-            .firstOrNull { it.loadLabel(pm).toString().contains(name.trim(), ignoreCase = true) }
-            ?.activityInfo?.packageName
+        val n = name.trim()
+        if (n.isEmpty()) return null
+        if (n.contains('.') && !n.contains(' ') && pm.getLaunchIntentForPackage(n) != null) return n   // a package name
+        fun norm(s: String) = s.lowercase().replace(Regex("[\\s._-]"), "")
+        val nn = norm(n)
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+            .map { norm(it.loadLabel(pm).toString()) to it.activityInfo.packageName }
+        return apps.firstOrNull { it.first == nn }?.second
+            ?: apps.firstOrNull { it.first.contains(nn) }?.second
+            ?: apps.firstOrNull { it.first.length >= 3 && nn.contains(it.first) }?.second
     }
 
     /** Android settings screens people ask for by name: bluetooth, wifi, location... in English, Arabic and Darija. */
@@ -62,10 +68,11 @@ class Actions(private val context: Context) {
         return map.firstOrNull { (keys, _) -> keys.any { n == it || n == "$it settings" || n == "${it} setting" } }?.second
     }
 
-    fun openApp(name: String): String? {
+    fun openApp(name: String, store: Boolean = true): String? {
         val pkg = findApp(name)
         if (pkg == null) {
             settingFor(name)?.let { return launch(Intent(it)) }
+            if (!store) return "I could not find an app called $name."
             return try {
                 launch(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + Uri.encode(name))))
                 "\"$name\" is not installed on this phone. I opened a Play Store search for it."

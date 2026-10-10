@@ -127,10 +127,12 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
             return
         }
 
+        var stepCount = 0
         val r = assistant.handle(
             text, null,
             confirm = { Confirmer.ask(assistant.appContext, it) },
-            onProgress = { msg -> Telegram.sendToOwner(prefs, msg) }
+            // agent steps are summarised: every 6th step, plus every other message
+            onProgress = { msg -> if (!msg.startsWith("Step ") || (++stepCount % 6 == 0)) Telegram.sendToOwner(prefs, msg) }
         )
         withContext(Dispatchers.IO) { Telegram.send(token, chat, r.shown) }
     }
