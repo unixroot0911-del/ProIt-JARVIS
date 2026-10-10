@@ -87,6 +87,12 @@ class Assistant(context: Context) {
         confirm: suspend (String) -> Boolean,
         onProgress: (String) -> Unit
     ): Reply {
+        val low = text.trim().lowercase()
+        if (low.startsWith("/pair")) {
+            val msg = "That is the Telegram pairing code. Send it to your Telegram bot (not here) and I will pair with that chat."
+            return Reply(msg, msg)
+        }
+        if (low == "/start") return Reply("Jarvis online. Say what you need.", "Jarvis online. Say what you need.")
         logChat("user", if (imageB64 != null) "[photo] $text" else text)
 
         val progress: (String) -> Unit = { m ->

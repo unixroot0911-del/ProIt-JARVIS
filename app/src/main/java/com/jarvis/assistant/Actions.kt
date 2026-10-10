@@ -40,8 +40,39 @@ class Actions(private val context: Context) {
             ?.activityInfo?.packageName
     }
 
+    /** Android settings screens people ask for by name: bluetooth, wifi, location... in English, Arabic and Darija. */
+    fun settingFor(name: String): String? {
+        val n = name.trim().lowercase()
+        val map = listOf(
+            listOf("bluetooth", "blue tooth", "بلوتوث", "بلوتوت", "بلوتووث") to android.provider.Settings.ACTION_BLUETOOTH_SETTINGS,
+            listOf("wifi", "wi-fi", "wi fi", "واي فاي", "وايفاي", "الواي فاي", "wlan") to android.provider.Settings.ACTION_WIFI_SETTINGS,
+            listOf("airplane", "flight mode", "وضع الطيران", "طيران") to android.provider.Settings.ACTION_AIRPLANE_MODE_SETTINGS,
+            listOf("location", "gps", "الموقع", "لوكيشن") to android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS,
+            listOf("mobile data", "data", "network", "الشبكة", "البيانات", "الداتا", "hotspot", "هوتسبوت") to android.provider.Settings.ACTION_WIRELESS_SETTINGS,
+            listOf("display", "brightness", "الشاشة", "السطوع") to android.provider.Settings.ACTION_DISPLAY_SETTINGS,
+            listOf("sound", "الصوت", "ringtone") to android.provider.Settings.ACTION_SOUND_SETTINGS,
+            listOf("battery saver", "battery", "توفير البطارية") to android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS,
+            listOf("nfc") to android.provider.Settings.ACTION_NFC_SETTINGS,
+            listOf("storage", "التخزين") to android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
+            listOf("accessibility", "إمكانية الوصول", "امكانية الوصول") to android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS,
+            listOf("language", "اللغة") to android.provider.Settings.ACTION_LOCALE_SETTINGS,
+            listOf("date", "time settings", "التاريخ") to android.provider.Settings.ACTION_DATE_SETTINGS,
+            listOf("settings", "setting", "الإعدادات", "الاعدادات", "إعدادات", "اعدادات") to android.provider.Settings.ACTION_SETTINGS
+        )
+        return map.firstOrNull { (keys, _) -> keys.any { n == it || n == "$it settings" || n == "${it} setting" } }?.second
+    }
+
     fun openApp(name: String): String? {
-        val pkg = findApp(name) ?: return "I could not find an app called $name."
+        val pkg = findApp(name)
+        if (pkg == null) {
+            settingFor(name)?.let { return launch(Intent(it)) }
+            return try {
+                launch(Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=" + Uri.encode(name))))
+                "\"$name\" is not installed on this phone. I opened a Play Store search for it."
+            } catch (e: Exception) {
+                "I could not find an app called $name."
+            }
+        }
         val i = context.packageManager.getLaunchIntentForPackage(pkg) ?: return "Cannot launch $name."
         return launch(i)
     }

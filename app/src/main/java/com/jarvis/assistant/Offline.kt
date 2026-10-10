@@ -87,7 +87,7 @@ object Offline {
         call.find(t)?.let { m -> return d(t, "Calling.", "جاري الاتصال.", "call_contact", m.groupValues[1].trim()) }
         open.find(t)?.let { m ->
             val name = m.groupValues[1].trim()
-            if (actions.findApp(name) != null) return d(t, "Opening $name.", "جاري فتح $name.", "open_app", name)
+            if (actions.findApp(name) != null || actions.settingFor(name) != null) return d(t, "Opening $name.", "جاري فتح $name.", "open_app", name)
         }
         return null
     }

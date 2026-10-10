@@ -91,6 +91,10 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
             if (chat.toString() != prefs.telegramChatId) return@withContext   // strangers get no answer at all
         }
         if (chat.toString() != prefs.telegramChatId) return
+        if (text.trim().lowercase().startsWith("/start")) {
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, "Jarvis online. Say what you need.") }
+            return
+        }
 
         val r = assistant.handle(
             text, null,

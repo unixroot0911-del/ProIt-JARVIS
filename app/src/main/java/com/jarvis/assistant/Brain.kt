@@ -125,8 +125,18 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         NEVER say "I can't", "I cannot", "I am unable" or "لا أستطيع". If no single action fits, find a way: combine actions; run_agent can operate
         any app on the screen; build_app can create the missing tool; web_answer can research; watch_start can observe; remind can follow up later.
         Pick the closest route, do it, and say briefly what you did. Only genuinely harmful or illegal requests are declined, in one short line with a safe alternative.
+        A "pair code", "pairing code" or "/pair 123456" is ALWAYS Jarvis' Telegram pairing, never Bluetooth: ignore it, never open settings because of it.
+        Only act on what the user actually asked in the latest message. Bluetooth, Wi-Fi, mobile data, airplane mode, location, display and sound:
+        open_app with that word opens its system settings screen; to flip a switch use run_agent (open that settings screen, tap the switch, report the result).
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
+
+    /** Old turns that would mislead the brain (pairing codes, past failed lookups) are dropped from its history. */
+    private fun stale(t: String): Boolean {
+        val s = t.lowercase()
+        return s.contains("/pair") || s.contains("pair code") || s.contains("pairing code") ||
+            s.contains("could not find an app called") || s.contains("bluetooth settings to pair")
+    }
 
     private fun studyRules(): String =
         if (prefs.mode == "study")
@@ -145,7 +155,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
         val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
         return try {
-            parse(complete(system, userText, memory.recentTurns(8), imageB64, json = true))
+            parse(complete(system, userText, memory.recentTurns(8).filterNot { stale(it.text) }, imageB64, json = true))
         } catch (e: Exception) {
             Decision(e.message ?: "The brain is unreachable.", failed = true)
         }
