@@ -9,7 +9,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-private val Scheduler_TYPES = setOf("set_alarm", "set_timer", "remind", "remind_at", "list_reminders", "cancel_reminder")
+private val Scheduler_TYPES = setOf("set_alarm", "set_timer", "remind", "remind_at", "list_reminders", "cancel_reminder", "schedule_task")
 
 /** [spoken] is what Jarvis says aloud; [shown] is what appears on screen or in the chat. */
 data class Reply(val spoken: String, val shown: String, val failed: Boolean = false)
@@ -267,10 +267,11 @@ class Assistant(context: Context) {
                     sendMessage(if (arg.count { it == '|' } >= 2) arg else "whatsapp|$arg", confirm, onProgress)
                 t == "send_sms" -> withContext(Dispatchers.IO) { device.sendSms(arg) }
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
-                t == "stop_agent" -> {
-                    val job = Engine.agentJob
-                    if (job?.isActive == true) { job.cancel(); "Agent stopped." } else "No agent is running."
-                }
+                t == "stop_agent" || t == "stop_play" || t == "stop_macro" -> Player.stopAll(arg.trim().lowercase() == "all")
+                t == "play" || t == "play_game" || t == "automate" -> Player.startAI(appContext, brain, arg)
+                t == "macro_create" -> Macros.create(appContext, brain, arg)
+                t == "macro_run" -> Player.startMacro(appContext, arg)
+                t == "macro_list" -> Macros.list(appContext)
                 t == "reply_notification" -> {
                     val p = arg.split("|", limit = 3)
                     withContext(Dispatchers.Default) { Replier.reply(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" }, p.getOrElse(2) { "" }) }

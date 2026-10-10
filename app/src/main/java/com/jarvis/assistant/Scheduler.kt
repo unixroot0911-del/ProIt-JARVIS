@@ -109,7 +109,28 @@ object Scheduler {
             list.remove(d)
             save(ctx, list)
         }
+        if (d.kind == "task") { runTask(ctx, d); return }
         Alerts.deliver(ctx, d, late = now - d.at > 120_000)
+    }
+
+    /** A scheduled command ("at 22:00 play Monoposto for 30 minutes"): wake the screen and carry it out like a typed request. */
+    @Suppress("DEPRECATION")
+    private suspend fun runTask(ctx: Context, d: Due) {
+        try {
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "jarvis:task").acquire(30_000)
+        } catch (e: Exception) { /* ignore */ }
+        delay(1500)
+        val prefs = Prefs(ctx)
+        val note: (String) -> Unit = { m ->
+            ChatBus.publish("jarvis", m)
+            try { Telegram.sendToOwner(prefs, m) } catch (e: Exception) { /* ignore */ }
+        }
+        withContext(Dispatchers.IO) { note("Running your scheduled task: ${d.text}") }
+        val r = try {
+            Assistant(ctx).handle(d.text, null, { q -> Confirmer.ask(ctx, q) }, { m -> if (m.startsWith("AGENT:")) note(m) })
+        } catch (e: Exception) { Reply("Task failed: ${e.message}", "Task failed: ${e.message}", true) }
+        withContext(Dispatchers.IO) { note(r.shown.ifBlank { r.spoken }) }
     }
 
     /** After a reboot or app update: re-arm everything, and deliver what was missed meanwhile. */
@@ -201,6 +222,18 @@ object Scheduler {
                 val text = p.getOrElse(1) { "" }.trim().ifBlank { "Reminder" }
                 add(ctx, at, text, "reminder", repeatOf(p.getOrElse(2) { "" }))
                 return "I will remind you at ${label(at)}: $text"
+            }
+            "schedule_task" -> {
+                val p = arg.split("|", limit = 3)
+                val w = p[0].trim()
+                val cmd = p.getOrElse(1) { "" }.trim()
+                if (cmd.isEmpty()) return "Tell me what to do and when."
+                val mins = w.replace(',', '.').toDoubleOrNull()
+                val at = if (mins != null) now + (mins * 60_000).toLong().coerceAtLeast(10_000L) else parseWhen(w)
+                    ?: return "I need the time as minutes from now, HH:MM, or yyyy-MM-dd HH:mm."
+                if (at <= now) return "That time has already passed."
+                add(ctx, at, cmd, "task", repeatOf(p.getOrElse(2) { "" }))
+                return "Scheduled for ${label(at)}: $cmd. I will do it by myself and tell you here and on Telegram."
             }
             "list_reminders" -> {
                 val l = load(ctx).sortedBy { it.at }

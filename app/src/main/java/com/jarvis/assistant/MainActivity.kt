@@ -125,8 +125,7 @@ class MainActivity : AppCompatActivity() {
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row2.addView(btn("STOP AGENT", false) {
-            val j = Engine.agentJob
-            if (j?.isActive == true) { j.cancel(); transcript.text = "Agent stopped." } else transcript.text = "No agent is running."
+            transcript.text = Player.stopAll(false)
         }, LinearLayout.LayoutParams(0, -2, 1f))
         row2.addView(btn("WATCH", false) {
             transcript.text = if (Watcher.active) Watcher.stop()

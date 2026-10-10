@@ -28,7 +28,7 @@ object Offline {
     private val play = rx("^(play|resume|play music|كمل|شغل الموسيقى|شغل المزيكا)$")
     private val next = rx("^(next|skip|next song|التالي|الموالية|الأغنية الموالية|الاغنية الموالية)$")
     private val prev = rx("^(previous|previous song|السابق|الأغنية السابقة|الاغنية السابقة)$")
-    private val stopAgent = rx("^(stop agent|stop the agent|وقف الوكيل|أوقف الوكيل|اوقف الوكيل)$")
+    private val stopAgent = rx("^(stop agent|stop the agent|stop playing|stop the game|stop game|stop macro|stop the macro|stop automation|stop everything|stop all|وقف الوكيل|أوقف الوكيل|اوقف الوكيل|وقف اللعب|اوقف اللعب|أوقف اللعب|وقف كل شيء|وقف كل شي|وقف الماكرو)$")
     private val timer = rx("^(?:set (?:a )?)?(?:timer|مؤقت|تايمر)(?: for| ل| ديال)? ?(\\d{1,4}) ?(seconds?|secs?|ثانية|ثواني|ثانيه|minutes?|mins?|دقيقة|دقائق|دقايق|دقيقه|hours?|ساعة|ساعات|ساعه)$")
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
     private val open = rx("^(?:open|launch|start|play|run|go to|let'?s(?: play| open| start| go| run| go to)?|lets(?: play| open| start| go)?|افتح|حل|شغل|العب|يلا|هيا|خلينا|نلعبو|لنلعب|ندير)\\s+(.{2,25})$")
@@ -43,7 +43,7 @@ object Offline {
         val t = raw.trim().trimEnd('.', '!', '?', '؟', '،').replace(Regex("\\s+"), " ")
         if (t.isEmpty() || t.length > 60) return null
 
-        if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", "")
+        if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", if (Regex("everything|all|كل").containsMatchIn(t)) "all" else "")
 
         if (cont.matches(t) && Engine.lastGoal.isNotEmpty() && Engine.agentJob?.isActive != true)
             return d(t, "Continuing.", "أواصل.", "run_agent", Engine.lastGoal)
