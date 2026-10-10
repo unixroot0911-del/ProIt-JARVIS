@@ -55,6 +55,7 @@ class CoreService : Service() {
         val a = assistant ?: Assistant(applicationContext).also { assistant = it }
         val v = voice ?: Voice(applicationContext, prefs).also { voice = it }
         if (chat == null) chat = FloatingChat(this, a, v)
+        Engine.speaker = { text -> v.speak(text) }
 
         if (botJob?.isActive != true) {
             botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }
@@ -124,6 +125,7 @@ class CoreService : Service() {
     }
 
     override fun onDestroy() {
+        Engine.speaker = null
         chat?.hide()
         hideOrb()
         botJob?.cancel()

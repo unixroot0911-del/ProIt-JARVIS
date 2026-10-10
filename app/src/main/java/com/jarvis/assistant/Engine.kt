@@ -21,6 +21,10 @@ object Engine {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile var agentJob: Job? = null
     @Volatile var foreground: Activity? = null
+    /** Hands-free conversation: after each answer Jarvis listens again. */
+    @Volatile var converse = false
+    /** Lets background features (watch mode, reminders) speak through the service voice. */
+    @Volatile var speaker: ((String) -> Unit)? = null
 }
 
 /** Broadcasts the orb state so the in-app orb and the floating orb stay in sync. */

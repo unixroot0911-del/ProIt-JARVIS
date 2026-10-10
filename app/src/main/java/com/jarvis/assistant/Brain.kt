@@ -91,11 +91,33 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "note" (arg = "topic|what to remember or review"), "set_mode" (arg = "study" or "normal"),
               "run_agent" (arg = the goal in plain words; Jarvis then operates the phone screen step by step by itself),
               "stop_agent" (arg = ""),
+              "watch_start" (arg = what to watch for or how to help, in plain words, e.g. "coach me in Minecraft and warn me about danger";
+                  Jarvis then watches the phone screen live, looks every few seconds and speaks up by itself when useful),
+              "watch_stop" (arg = ""),
+              "look_screen" (arg = the question about what is on the screen right now: read it, explain it, translate it, help with it),
+              "web_answer" (arg = a question that needs fresh internet facts: news, prices, scores, weather, who holds a role now),
+              "remind" (arg = "minutes from now|what to remind"; compute the minutes yourself from the current time),
+              "converse" (arg = "on" or "off": hands-free spoken conversation where Jarvis listens again after every answer),
+              "build_app" (arg = "name|full description, or the change to make": Jarvis writes a complete playable game or tool and opens it on the phone),
+              "open_creation" (arg = name of an app or game built earlier),
               "pay" / "delete_file" (always need the user's confirmation).
           "remember": null or a short fact about the user worth storing long-term.
         A "Phone context" block follows: current time, battery, calendar, recent notifications, today's spending and habits.
         Answer questions about messages, calendar or what the user missed ONLY from that block; never invent anything.
-        Never invent capabilities you do not have. If you cannot do something, say so plainly.
+        YOU CAN (use the action, never answer "I can't" for these): watch the user's screen live while they play, work or study
+        and comment or coach (watch_start); look at the screen once and read, explain or translate it (look_screen);
+        look things up on the web (web_answer); remind them later (remind); talk hands-free (converse); operate any app (run_agent);
+        build real playable games and tools on this phone (build_app); read and answer notifications; send messages; call;
+        photos via the LOOK button.
+        "Watch me while I do X" means watch_start with X as the arg: confirm in one short line, do not refuse.
+        Watching sees the phone screen, not the user's body or room; for that, tell them to tap LOOK for a photo.
+        BUILDING: build_app writes one complete self-contained HTML5 game or app (intro cutscene, gameplay, saving, ending) and opens it.
+        If the user asks for a copy of a commercial game (for example "The Forest as a 2D mobile game, same story"), never answer with a bare
+        refusal: you cannot copy its exact characters, story text, art or assets, so build an ORIGINAL game with the same genre, mechanics
+        and mood (new name, new story, new art), say that in one short line, and issue build_app. To improve something already built
+        ("add caves", "make it harder"), reuse the same name so the existing version is upgraded.
+        A question like "do you know X?" is conversation, not an open_app request.
+        Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 
     private fun studyRules(): String =
@@ -173,7 +195,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         userText: String,
         history: List<Turn> = emptyList(),
         imageB64: String? = null,
-        json: Boolean = true
+        json: Boolean = true,
+        big: Boolean = false
     ): String {
         val haveGemini = prefs.geminiKey.isNotEmpty()
         val haveGroq = prefs.groqKey.isNotEmpty() && imageB64 == null
@@ -184,11 +207,45 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             )
         }
         val runners = ArrayList<Pair<String, () -> String>>()
-        if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json) })
-        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json) })
-        runners.sortBy { if (isBad(it.first)) 1 else 0 }     // healthy first; Groq leads when both are healthy
-        return race(runners, hedgeMs = 6000)
+        if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json, if (big) 8000 else 0) })
+        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json, if (big) 16000 else 0) })
+        // healthy first; Groq leads when both are healthy; big generations prefer Gemini (much larger output limit)
+        runners.sortBy { (if (isBad(it.first)) 2 else 0) + (if (big && it.first != "Gemini") 1 else 0) }
+        return race(runners, hedgeMs = if (big) 70000 else 6000)
     }
+
+    // ---- web answers ----
+
+    /** Answers a question with live Google Search grounding through Gemini; falls back to memory when search is unavailable. */
+    suspend fun search(question: String): String = withContext(Dispatchers.IO) {
+        val fallback = plainSystem() + "\nWeb search is unavailable right now. Answer from memory and say clearly it may be outdated. Plain text."
+        if (prefs.geminiKey.isEmpty()) return@withContext complete(fallback, question, emptyList(), null, json = false).trim()
+        try {
+            geminiSearch(question).trim()
+        } catch (e: Exception) {
+            complete(fallback, question, emptyList(), null, json = false).trim()
+        }
+    }
+
+    private fun geminiSearch(q: String): String =
+        tryModels(prefs.geminiModel, { discoverGemini() }, geminiFallbacks, { prefs.geminiModel = it }) { model ->
+            val sys = plainSystem() + "\nAnswer using up-to-date web results. Be brief (at most 5 sentences), in the user's language, " +
+                "plain text, no markdown. Name the source when it matters."
+            val body = JSONObject()
+                .put("contents", geminiContents(emptyList(), q, null))
+                .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sys))))
+                .put("generationConfig", JSONObject().put("temperature", 0.3))
+            val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
+                body.toString().toByteArray(Charsets.UTF_8), "application/json",
+                mapOf("x-goog-api-key" to prefs.geminiKey), 40000)
+            val parts = JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
+                ?.optJSONObject("content")?.optJSONArray("parts")
+            val sb = StringBuilder()
+            if (parts != null) for (i in 0 until parts.length()) sb.append(parts.getJSONObject(i).optString("text", ""))
+            if (sb.isBlank()) throw IllegalStateException("empty search answer")
+            sb.toString()
+        }
 
     // ---- speech to text ----
 
@@ -378,10 +435,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         return contents
     }
 
-    private fun geminiRun(system: String, contents: JSONArray, json: Boolean): String =
+    private fun geminiRun(system: String, contents: JSONArray, json: Boolean, maxOut: Int = 0): String =
         tryModels(prefs.geminiModel, { discoverGemini() }, geminiFallbacks, { prefs.geminiModel = it }) { model ->
             fun send(fast: Boolean): String {
                 val gen = JSONObject().put("temperature", 0.7)
+                if (maxOut > 0) gen.put("maxOutputTokens", maxOut)
                 if (json) gen.put("responseMimeType", "application/json")
                 if (fast) {
                     // Gemini 2.5 and 3 "think" before answering, which costs seconds. Ask for no or minimal thinking.
@@ -395,7 +453,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
                 }
                 val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
                     body.toString().toByteArray(Charsets.UTF_8), "application/json",
-                    mapOf("x-goog-api-key" to prefs.geminiKey), 30000)
+                    mapOf("x-goog-api-key" to prefs.geminiKey), if (maxOut > 0) 150000 else 30000)
                 val parts = JSONObject(resp).optJSONArray("candidates")?.optJSONObject(0)
                     ?.optJSONObject("content")?.optJSONArray("parts")
                 val sb = StringBuilder()
@@ -425,18 +483,18 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
      * JSON mode is deliberately not used: it makes some models fail with "Failed to generate JSON".
      * The prompt demands JSON and [extractJson] recovers it from whatever the model returns.
      */
-    private fun groqRun(system: String, messages: JSONArray, @Suppress("UNUSED_PARAMETER") json: Boolean): String =
+    private fun groqRun(system: String, messages: JSONArray, @Suppress("UNUSED_PARAMETER") json: Boolean, maxOut: Int = 0): String =
         tryModels(prefs.groqModel, { discoverGroq() }, groqPreferred, { prefs.groqModel = it }) { model ->
             fun send(tuned: Boolean): String {
                 val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.6)
                 if (tuned) {
-                    body.put("max_completion_tokens", 1024)
+                    body.put("max_completion_tokens", if (maxOut > 0) maxOut else 1024)
                     if (model.contains("gpt-oss")) body.put("reasoning_effort", "low")
                     else if (model.contains("qwen")) body.put("reasoning_effort", "none")
                 }
                 val resp = request("POST", "https://api.groq.com/openai/v1/chat/completions",
                     body.toString().toByteArray(Charsets.UTF_8), "application/json",
-                    mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 30000)
+                    mapOf("Authorization" to "Bearer ${prefs.groqKey}"), if (maxOut > 0) 150000 else 30000)
                 return JSONObject(resp).getJSONArray("choices").getJSONObject(0)
                     .getJSONObject("message").optString("content", "")
             }

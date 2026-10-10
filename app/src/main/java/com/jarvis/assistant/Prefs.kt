@@ -61,6 +61,15 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("overlay_on", false)
         set(v) = sp.edit().putBoolean("overlay_on", v).apply()
 
+    /** Watch mode: seconds between looks, and auto-stop after this many minutes. */
+    var watchSeconds: Int
+        get() = sp.getInt("watch_s", 10)
+        set(v) = sp.edit().putInt("watch_s", v).apply()
+
+    var watchMinutes: Int
+        get() = sp.getInt("watch_m", 90)
+        set(v) = sp.edit().putInt("watch_m", v).apply()
+
     var telegramToken: String
         get() = str("tg_token")
         set(v) = put("tg_token", v.trim())

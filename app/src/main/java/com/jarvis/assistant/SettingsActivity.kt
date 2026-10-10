@@ -54,6 +54,8 @@ class SettingsActivity : AppCompatActivity() {
         val briefings = switch("Morning and evening briefings", prefs.briefingsOn)
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
+        val watchEvery = field(prefs.watchSeconds.toString(), "Seconds between looks (default 10)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
+        val watchMax = field(prefs.watchMinutes.toString(), "Auto-stop after minutes (default 90)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
         val overlay = switch("Floating Jarvis: orb + chat window over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
@@ -71,6 +73,8 @@ class SettingsActivity : AppCompatActivity() {
             prefs.morningTime = morning.text.toString().ifBlank { "07:30" }
             prefs.eveningTime = evening.text.toString().ifBlank { "21:00" }
             prefs.overlayOn = overlay.isChecked
+            prefs.watchSeconds = watchEvery.text.toString().toIntOrNull() ?: 10
+            prefs.watchMinutes = watchMax.text.toString().toIntOrNull() ?: 90
             prefs.telegramToken = tgToken.text.toString()
             Briefings.schedule(this)
             ContextCompat.startForegroundService(this, Intent(this, CoreService::class.java))
@@ -87,6 +91,7 @@ class SettingsActivity : AppCompatActivity() {
             addView(label("VOICE")); addView(locale); addView(speak); addView(sttAccurate)
             addView(label("MODE")); addView(study)
             addView(label("BRIEFINGS")); addView(briefings); addView(morning); addView(evening)
+            addView(label("WATCH MODE (live screen watching)")); addView(watchEvery); addView(watchMax)
             addView(label("FLOATING ORB")); addView(overlay)
             addView(button("Allow display over other apps") {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))

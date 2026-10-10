@@ -127,6 +127,10 @@ class MainActivity : AppCompatActivity() {
             val j = Engine.agentJob
             if (j?.isActive == true) { j.cancel(); transcript.text = "Agent stopped." } else transcript.text = "No agent is running."
         }, LinearLayout.LayoutParams(0, -2, 1f))
+        row2.addView(btn("WATCH", false) {
+            transcript.text = if (Watcher.active) Watcher.stop()
+            else Watcher.start(this, assistant.brain, "Coach me: comment only when you notice something genuinely useful")
+        }, LinearLayout.LayoutParams(0, -2, 1f))
         row2.addView(btn("SETTINGS", false) {
             startActivity(Intent(this, SettingsActivity::class.java))
         }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -137,8 +141,17 @@ class MainActivity : AppCompatActivity() {
         column.addView(input, LinearLayout.LayoutParams(-1, -2))
         column.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 16 })
         column.addView(row2, LinearLayout.LayoutParams(-1, -2))
+        column.addView(btn("MY APPS AND GAMES", false) { showCreations() }, LinearLayout.LayoutParams(-1, -2))
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
+    }
+
+    private fun showCreations() {
+        val names = Creations.names(this)
+        val b = androidx.appcompat.app.AlertDialog.Builder(this).setTitle("My apps and games")
+        if (names.isEmpty()) b.setMessage("Nothing yet. Ask Jarvis: \"build me a game about ...\"")
+        else b.setItems(names.toTypedArray()) { _, i -> Creations.find(this, names[i])?.let { Creations.open(this, it) } }
+        b.setPositiveButton("Close", null).show()
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -184,6 +197,7 @@ class MainActivity : AppCompatActivity() {
                 val wav = voice.record()
                 listening = false
                 if (wav == null) {
+                    Engine.converse = false
                     transcript.text = "I did not hear anything."
                     busy = false
                     setState(OrbState.IDLE, "ONLINE")
@@ -192,6 +206,7 @@ class MainActivity : AppCompatActivity() {
                 setState(OrbState.THINKING, "TRANSCRIBING")
                 val text = assistant.brain.transcribe(wav)
                 if (text.isBlank()) {
+                    Engine.converse = false
                     transcript.text = "I did not catch that."
                     busy = false
                     setState(OrbState.IDLE, "ONLINE")
@@ -260,9 +275,13 @@ class MainActivity : AppCompatActivity() {
             if (!r.failed) {
                 setState(OrbState.SPEAKING, "SPEAKING")
                 voice.speak(r.spoken)
+                if (Engine.converse) voice.awaitSpeech()
+            } else {
+                Engine.converse = false
             }
             busy = false
             setState(OrbState.IDLE, "ONLINE")
+            if (Engine.converse) startListening()
         }
     }
 

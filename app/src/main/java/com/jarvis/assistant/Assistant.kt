@@ -42,6 +42,8 @@ class Assistant(context: Context) {
         val sb = StringBuilder()
         sb.append("Now: ").append(SimpleDateFormat("EEEE yyyy-MM-dd HH:mm", Locale.ENGLISH).format(Date())).append('\n')
         sb.append("Battery: ").append(device.batteryLine()).append('\n')
+        if (Watcher.active) sb.append("Watch mode: ON, watching the screen for: ").append(Watcher.topic).append('\n')
+        Creations.names(appContext).take(8).let { if (it.isNotEmpty()) sb.append("Apps and games built so far: ").append(it.joinToString(", ")).append('\n') }
         sb.append("Calendar today: ").append(device.calendarToday()).append('\n')
 
         val hours = if (detailed) 14 else 8
@@ -224,6 +226,17 @@ class Assistant(context: Context) {
                     "Mode: ${prefs.mode}."
                 }
                 t == "run_agent" -> startAgent(arg, confirm, onProgress)
+                t == "watch_start" -> Watcher.start(appContext, brain, arg)
+                t == "watch_stop" -> Watcher.stop()
+                t == "look_screen" -> Watcher.see(appContext, brain, arg)
+                t == "web_answer" -> brain.search(arg)
+                t == "remind" -> Reminders.set(appContext, arg)
+                t == "build_app" -> Creations.build(appContext, brain, arg, onProgress)
+                t == "open_creation" -> Creations.openByName(appContext, arg)
+                t == "converse" -> {
+                    Engine.converse = arg.trim().lowercase() !in listOf("off", "false", "no", "stop")
+                    if (Engine.converse) "Conversation mode on. Just keep talking; say 'stop' to end it." else "Conversation mode off."
+                }
                 else -> actions.run(type, arg)
             }
         } catch (e: Exception) {

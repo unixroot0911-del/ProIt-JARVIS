@@ -6,6 +6,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.speech.tts.TextToSpeech
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -127,6 +128,14 @@ class Voice(private val context: Context, private val prefs: Prefs) {
             tts?.setLanguage(Locale.getDefault())
         }
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis")
+    }
+
+    /** Waits until Jarvis has finished talking, so hands-free mode does not record its own voice. */
+    suspend fun awaitSpeech(maxMs: Long = 25000) {
+        delay(500)
+        var waited = 500L
+        while (tts?.isSpeaking == true && waited < maxMs) { delay(150); waited += 150 }
+        delay(250)
     }
 
     fun shutdown() {

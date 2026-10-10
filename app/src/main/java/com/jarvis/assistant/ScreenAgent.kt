@@ -3,12 +3,17 @@ package com.jarvis.assistant
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.json.JSONObject
 
 class ScreenDump(val pkg: String, val text: String, val nodes: List<AccessibilityNodeInfo>, val labels: List<String>)
@@ -116,6 +121,27 @@ class JarvisAccessibilityService : AccessibilityService() {
             if (r != null) return r
         }
         return null
+    }
+
+    /** A real picture of the screen (Android 11+). Null if blocked: protected windows, locked phone, or called too fast. */
+    suspend fun screenshot(): Bitmap? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        return suspendCancellableCoroutine { cont ->
+            try {
+                takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        val hb = result.hardwareBuffer
+                        val bmp = try {
+                            Bitmap.wrapHardwareBuffer(hb, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                        } catch (e: Exception) { null } finally { hb.close() }
+                        if (cont.isActive) cont.resume(bmp)
+                    }
+                    override fun onFailure(errorCode: Int) { if (cont.isActive) cont.resume(null) }
+                })
+            } catch (e: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
     }
 
     fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
