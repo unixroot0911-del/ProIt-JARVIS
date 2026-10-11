@@ -17,6 +17,7 @@ data class Reply(val spoken: String, val shown: String, val failed: Boolean = fa
 /** The single pipeline every input goes through: voice, typed text, chat windows, Telegram, briefings. */
 class Assistant(context: Context) {
     val appContext: Context = context.applicationContext
+    init { Diag.install(appContext) }
     private val prefs = Prefs(appContext)
     private val memory = Memory.get(appContext)
     val brain = Brain(prefs, memory)
@@ -269,6 +270,7 @@ class Assistant(context: Context) {
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
                 t == "stop_agent" || t == "stop_play" || t == "stop_macro" -> Player.stopAll(arg.trim().lowercase() == "all")
                 t == "play" || t == "play_game" || t == "automate" -> Player.startAI(appContext, brain, arg)
+                t == "last_error" -> Diag.report(appContext)
                 t == "play_memory" -> Player.memoryReport(appContext, arg)
                 t == "play_forget" -> Player.forget(appContext, arg)
                 t == "macro_create" -> Macros.create(appContext, brain, arg)

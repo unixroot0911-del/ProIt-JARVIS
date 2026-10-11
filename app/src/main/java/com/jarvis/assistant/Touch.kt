@@ -10,6 +10,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.coroutines.resume
@@ -187,7 +189,13 @@ object Touch {
         return false
     }
 
-    private suspend fun dispatch(svc: AccessibilityService, g: GestureDescription): Boolean = suspendCancellableCoroutine { cont ->
+    private suspend fun dispatch(svc: AccessibilityService, g: GestureDescription): Boolean {
+        var total = 0L
+        try { for (i in 0 until g.strokeCount) total = maxOf(total, g.getStroke(i).startTime + g.getStroke(i).duration) } catch (e: Exception) { total = 600 }
+        return withTimeoutOrNull(total + 2500) { dispatchRaw(svc, g) } ?: false
+    }
+
+    private suspend fun dispatchRaw(svc: AccessibilityService, g: GestureDescription): Boolean = suspendCancellableCoroutine { cont ->
         try {
             val ok = svc.dispatchGesture(g, object : AccessibilityService.GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) { if (cont.isActive) cont.resume(true) }
@@ -209,7 +217,7 @@ object Touch {
         fun py(y: Float) = (y * h).coerceIn(1f, h - 1)
         var fails = 0
         try {
-            while (job?.isActive == true) {
+            while (currentCoroutineContext().isActive) {
                 val svc = JarvisAccessibilityService.instance ?: break
                 val now = System.currentTimeMillis()
                 var due: List<Item> = emptyList()
@@ -283,6 +291,11 @@ object Touch {
                 due.forEach { it.done?.complete(Unit) }
                 if (!ok) delay(60)
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            problem = "Touch engine error: " + (e.message ?: e.toString()).take(120)
+            Diag.record(e)
         } finally {
             // lift everything that is still down
             try {

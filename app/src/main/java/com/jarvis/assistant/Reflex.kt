@@ -67,7 +67,7 @@ object Hub {
     private suspend fun loop(svc: JarvisAccessibilityService) {
         var fails = 0
         while (users > 0) {
-            val b = Shots.take(svc)
+            val b = try { Shots.take(svc) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { Diag.record(e); null }
             if (b != null) {
                 fails = 0
                 latest = Frame(b, makeSmall(b), System.currentTimeMillis())

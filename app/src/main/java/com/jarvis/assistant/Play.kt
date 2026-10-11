@@ -536,6 +536,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         var emptyTurns = 0
         var errors = 0
         var turns = 0
+        var blind = 0
+        var traced = 0
         var unchanged = 0
         var reopen = 0
         var ownFront = 0
@@ -546,7 +548,6 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val history = ArrayDeque<String>()
         var ended = "Finished playing $name."
         try {
-            if (reconDone) report(ctx, "I remember $name (${statsText(sp, memKey)}). I already know its controls, so I am jumping straight in.")
             if (pkg != null) { launchPkg(ctx, pkg); delay(4500) }
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
@@ -594,6 +595,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     continue
                 }
                 payHits = 0
+                if (Build.VERSION.SDK_INT >= 30 && bmp == null) {
+                    blind++
+                    if (blind == 3) report(ctx, "[$name] I cannot capture the screen yet (front app: ${front.ifBlank { "unknown" }}). Retrying.")
+                    if (blind >= 6) { ended = "Stopped playing $name: Android will not let me capture the screen (the game may block screenshots). I will not play blind."; break }
+                    delay(1500)
+                    continue
+                }
+                blind = 0
+                if (traced < 3) report(ctx, "[trace ${traced + 1}] front=${front.ifBlank { "?" }} screen=${bmp?.let { "${it.width}x${it.height}" } ?: "none"} touch=${if (Touch.running) "on" else "OFF"}${Touch.problem.let { if (it.isBlank()) "" else " problem=$it" }}")
                 var frame: String? = null
                 if (bmp != null) {
                     val sg = sig(bmp)
@@ -677,6 +687,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 parseFail = 0
                 lastProgress = System.currentTimeMillis()
                 blocker = ""
+                if (traced < 3) { traced++; report(ctx, "[trace $traced] brain: " + raw.replace("\n", " ").take(260)) }
+                if (Touch.problem.isNotBlank()) { ended = "Stopped playing $name: " + Touch.problem; break }
                 note = o.optString("note", note).take(700)
                 val see = o.optString("see", "").trim()
                 val plan = o.optString("plan", "").trim()

@@ -18,7 +18,7 @@ import kotlin.coroutines.resume
 
 /** Process-wide runtime state shared by the activity, services and background workers. */
 object Engine {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Diag.record(e) })
     @Volatile var agentJob: Job? = null
     @Volatile var foreground: Activity? = null
     /** Hands-free conversation: after each answer Jarvis listens again. */

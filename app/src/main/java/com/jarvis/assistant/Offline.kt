@@ -33,6 +33,7 @@ object Offline {
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
     private val open = rx("^(?:open|launch|start|play|run|go to|let'?s(?: play| open| start| go| run| go to)?|lets(?: play| open| start| go)?|افتح|حل|شغل|العب|يلا|هيا|خلينا|نلعبو|لنلعب|ندير)\\s+(.{2,25})$")
     private val playApp = rx("^(?:play|العب|لنلعب|نلعبو|خلينا نلعب|يلا نلعب|let'?s play|lets play|start playing)\\s+(.{2,30})$")
+    private val lastErr = rx("^(last error|show error|show the error|what went wrong|آخر خطأ|اخر خطأ|اخر خطا|آخر خطا|شنو وقع|ما الخطأ)$")
     private val playCur = rx("^(?:keep playing(?: it)?|continue playing|play it|play this(?: game)?|play the current game|play now|كمل اللعب|واصل اللعب|العبها|العب هذه اللعبة|العب اللعبة|ابدأ اللعب)$")
     private val converseOn = rx("^(conversation mode|talk to me|let'?s talk|hands.?free( mode)?|وضع المحادثة|كلمني|تكلم معي|هضر معايا)$")
     private val converseOff = rx("^(stop conversation|end conversation|conversation off|that'?s all|خلاص|كفى|بس|وقف المحادثة|سالينا)$")
@@ -47,6 +48,7 @@ object Offline {
 
         if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", if (Regex("everything|all|كل").containsMatchIn(t)) "all" else "")
 
+        if (lastErr.matches(t)) return d(t, "Here is the last error.", "هذا آخر خطأ.", "last_error", "")
         if (playCur.matches(t)) return d(t, "Playing what is on your screen.", "جاري اللعب.", "play", "||")
         playApp.find(t)?.let { m ->
             val name = m.groupValues[1].trim().removePrefix("the ").trim()
