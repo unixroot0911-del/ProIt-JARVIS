@@ -251,10 +251,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         history: List<Turn> = emptyList(),
         imageB64: String? = null,
         json: Boolean = true,
-        big: Boolean = false
+        big: Boolean = false,
+        play: Boolean = false
     ): String {
         val haveGemini = prefs.geminiKey.isNotEmpty()
-        val haveGroq = prefs.groqKey.isNotEmpty() && imageB64 == null
+        val haveGroq = prefs.groqKey.isNotEmpty() && imageB64 == null && !play
         if (!haveGemini && !haveGroq) {
             throw IllegalStateException(
                 if (imageB64 != null && prefs.groqKey.isNotEmpty()) "Vision needs a Gemini key. Add one in Settings."
@@ -263,7 +264,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         }
         val runners = ArrayList<Pair<String, () -> String>>()
         if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json, if (big) 8000 else 0) })
-        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json, if (big) 16000 else 0) })
+        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json, if (big) 16000 else 0, play) })
         // healthy first; Groq leads when both are healthy; big generations prefer Gemini (much larger output limit)
         runners.sortBy { (if (isBad(it.first)) 2 else 0) + (if (big && it.first != "Gemini") 1 else 0) }
         return race(runners, hedgeMs = if (big) 70000 else 6000)
@@ -525,13 +526,19 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         return contents
     }
 
-    private fun geminiRun(system: String, contents: JSONArray, json: Boolean, maxOut: Int = 0): String =
-        tryModels(prefs.geminiModel, { discoverGemini() }, geminiFallbacks, { prefs.geminiModel = it }) { model ->
+    private fun geminiRun(system: String, contents: JSONArray, json: Boolean, maxOut: Int = 0, think: Boolean = false): String =
+        tryModels(if (think) "gemini-flash-latest" else prefs.geminiModel, { discoverGemini() }, geminiFallbacks,
+            { if (!think) prefs.geminiModel = it }) { model ->
             fun send(fast: Boolean): String {
-                val gen = JSONObject().put("temperature", 0.7)
+                val gen = JSONObject().put("temperature", if (think) 0.35 else 0.7)
                 if (maxOut > 0) gen.put("maxOutputTokens", maxOut)
                 if (json) gen.put("responseMimeType", "application/json")
-                if (fast) {
+                if (think) {
+                    // playing games needs real reasoning: a small thinking budget, on the stronger Flash model first
+                    gen.put("thinkingConfig",
+                        if (model.contains("2.5")) JSONObject().put("thinkingBudget", 1024)
+                        else JSONObject().put("thinkingLevel", "low"))
+                } else if (fast) {
                     // Gemini 2.5 and 3 "think" before answering, which costs seconds. Ask for no or minimal thinking.
                     gen.put("thinkingConfig",
                         if (model.contains("2.5")) JSONObject().put("thinkingBudget", 0)

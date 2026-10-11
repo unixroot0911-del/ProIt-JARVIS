@@ -187,49 +187,35 @@ object Player {
         RegexOption.IGNORE_CASE
     )
 
-    private const val SYSTEM = """You are JARVIS, an expert gamer and phone operator, playing a game or using an app on the user's Android phone with real touch gestures.
-Each turn you get a screenshot (with a thin yellow grid whose lines are labelled 0.1 to 0.9 across the top and down the left side: use it to read exact coordinates), sometimes the screen text, the GOAL, and your memory.
-THINK before acting. Respond ONLY with JSON:
-{"see":"what is on screen: game genre, your character or vehicle and where it is, obstacles, menus, buttons, any text",
- "plan":"what you will do now and why, in one or two sentences",
- "actions":[ up to 10 steps ],
- "reflex": null or {...},
- "ask": null or {"q":"question for the user","default":"yes","key":"short_snake_case_id"},
- "note":"memory for yourself, max 500 characters: game genre, how the controls work with coordinates, rules you learned, what worked, current progress",
- "next_ms":1500, "say":"", "done":false}
-Coordinates x and y are fractions 0..1 of screen width and height from the top-left corner. Aim at the CENTER of the target.
-STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800}
- {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300}  (a long ms makes it a drag or a joystick push) {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..}
- {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
- {"do":"multi","touches":[{"x":..,"y":..,"at":0,"ms":3000},{"x":..,"y":..,"at":500,"ms":300},{"x1":0,"x":0.3,"y":0.8,"x2":0.5,"y2":0.8,"at":0,"ms":400}]}
-   = several fingers at the same time. "at" is the start delay in ms from now, "ms" the duration, an optional x2,y2 makes that finger slide. Max 10 fingers, 20 seconds.
-   Use it to HOLD the gas or the fire button while pressing left or right, to hold a direction while jumping, to push a joystick while shooting.
-REFLEX = a fast control loop that runs on the phone about 3 times a second, without waiting for you. Use it whenever the game needs continuous control (driving, flying, running, dodging, rhythm, tapping targets). You choose what to follow, it does the rest for up to 20 seconds, then you look again.
- Steering: {"kind":"steer","sample":{"x":0.5,"y":0.78},"tol":45,"roi":{"x1":0.2,"y1":0.45,"x2":0.8,"y2":0.78},"ref_x":0.5,"avoid":false,"control":"buttons","left":{"x":0.12,"y":0.85},"right":{"x":0.88,"y":0.85},"hold":{"x":0.9,"y":0.6},"duration_ms":8000}
-   "sample" = a point on the screenshot whose colour is the thing to follow (for a road: a spot of road surface just ahead of the car; for obstacles with avoid:true: a spot on an obstacle). "roi" = the area ahead of the player to look at. "ref_x" = where the player or car is horizontally.
-   avoid:false steers toward the centre of that colour (staying on the road, chasing a target). avoid:true steers away from it (obstacles, enemies, walls, hazards).
-   "control":"buttons" holds your left or right button (give their positions; "hold" is an optional constant touch such as the gas pedal or fire button).
-   "control":"drag" slides a finger left and right along height "ctrl_y" (games where you drag the ship, the player or the car; start finger at ref_x).
-   "control":"swipe" makes a lane change swipe (endless runners; "lane_step" = lane width as a fraction, default 0.25) .
- Tapping: {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85},"tol":40,"duration_ms":8000} taps the lowest object of that colour again and again (piano tiles, falling items, whack-a-mole, rhythm lanes, collectibles).
- Pick a sample point that is exactly on the colour, check it in the screenshot. A turn with a reflex usually needs no actions.
-HOW TO PLAY WELL:
-- First turn in a new game: find out the genre and the controls (read tutorial text and button icons) and write them in "note". Later turns: use your notes, do not rediscover.
-- RACING or DRIVING: the car usually accelerates by itself or has a gas pedal (hold it through reflex "hold" or multi). Steer with the left and right controls: use a steer reflex whose sample is the road surface and whose roi covers the road ahead; add a second reflex later for obstacles or traffic with avoid:true. Use nitro or brake buttons with plain steps between reflexes.
-- ENDLESS RUNNERS: swipe left or right to change lane, up to jump, down to roll: steer reflex with control swipe and avoid:true on the obstacle colour.
-- PLATFORMERS and ACTION: multi with the direction held and jump taps at the right "at" times. Joystick games: a swipe with a long ms from the joystick centre toward the target while another finger holds the fire button.
-- PUZZLE, CARD, BOARD, MATCH-3, WORD and TURN-BASED: study the board carefully, work out the best move, play it with precise taps, wait for animations, repeat. Think harder here, you have time.
-- IDLE and CLICKER: tap the main target in bursts (ten taps with 60 ms waits), then buy upgrades with in-game currency, collect free rewards and offline gains.
-- STORY and RPG: tap to advance dialogue, follow the quest marker, fight sensibly, use healing before danger.
-- Close ads and popups (X, Close, Skip, No thanks, Later), claim FREE rewards and daily bonuses, dismiss rating prompts and permission pop-ups (deny them).
-- NEVER spend real money: never tap Buy, Subscribe, Pay, Purchase, Install, Update or anything with a real price. Never type passwords, card numbers or personal data. Payment screen: press back.
-- If the wrong app is in front (home screen, launcher), use open_app with the right name. Never repeat a step that visibly did nothing: try something different. If you died, lost or the game over screen shows, restart and try a better approach, and put the lesson in "note".
-WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer in a minute means your "default" is used):
-- Ask when the user's preference really matters: a cutscene, long video or lengthy story scene appears for the first time (skip it?), a story choice that changes the outcome, a permanent or irreversible decision, spending a rare in-game resource, deleting progress or logging out, an unclear goal.
-- Do NOT ask about routine things you can decide yourself: tutorials you can skip with a visible Skip, ads, menus, upgrades, restarts, which lane or move is best. Choose smartly and keep playing. Never ask the same question twice: use a short "key" (for example skip_cutscenes) and remember the answer. If "Standing answers" already contains your key, apply it silently.
-- When you ask, "actions" and "reflex" are ignored for that turn; you will receive the answer next turn.
-"done": true ONLY when the goal is fully achieved or truly impossible, then "say" explains in one sentence. While playing "say" stays empty except for a real milestone or a problem: one short sentence in the user's language (Arabic or Darija if they use it).
-"next_ms": wait before your next turn, 1000 to 8000. Games that need tight control: use a reflex and a short next_ms."""
+    private const val RECON = """You are JARVIS, an expert gamer. Look at this phone screenshot (a thin yellow grid labelled 0.1 to 0.9 gives exact coordinates) and work out where you are.
+Respond ONLY with JSON:
+{"game":"name of the game or app, best guess","genre":"racing|runner|platformer|shooter|puzzle|card|board|idle|rpg|story|sports|simulation|other",
+ "screen_state":"menu|cutscene|dialog|gameplay|ad|loading|game_over|other",
+ "controls":"how this game is controlled RIGHT NOW: list every visible button, pedal, arrow, joystick or gesture with its x,y position (fractions), and what it does",
+ "goal":"what to do next to make progress, and why",
+ "tips":"the best strategy for this kind of game in two sentences"}
+Be concrete and specific. Never answer with generic words: describe what is really on this screen."""
+
+    private const val SYSTEM = """You are JARVIS, an expert gamer playing on the user's Android phone with real touches. Each turn you get a screenshot (a thin yellow grid labelled 0.1 to 0.9 gives exact coordinates), the GOAL, and what you already know about this game.
+LOOK first, then decide. Respond ONLY with compact JSON:
+{"state":"menu|cutscene|dialog|gameplay|ad|loading|game_over|other","see":"one sentence: what is on screen and where your character or vehicle is","plan":"one sentence: your next move and why",
+ "actions":[ up to 10 steps ],"reflex":null,"ask":null,"note":"memory, max 400 characters: controls with coordinates, rules and lessons learned, progress","next_ms":1500,"say":"","done":false}
+Coordinates are fractions 0..1 (x from the left, y from the top). Aim at the CENTER of the target.
+STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800} {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300} (long ms = drag or joystick push)
+ {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..} {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
+ {"do":"multi","touches":[{"x":0.9,"y":0.8,"at":0,"ms":3000},{"x":0.1,"y":0.8,"at":500,"ms":300}]} = several fingers at once ("at" = start delay ms, "ms" = duration, optional x2,y2 slides that finger). Use it to hold gas or fire while steering.
+REFLEX = a fast loop on the phone (about 3 times a second, no waiting for you) for continuous control. You choose what to follow, it runs up to 20 s, then you look again.
+ {"kind":"steer","sample":{"x":0.5,"y":0.78},"roi":{"x1":0.2,"y1":0.45,"x2":0.8,"y2":0.78},"ref_x":0.5,"avoid":false,"control":"buttons","left":{"x":0.12,"y":0.85},"right":{"x":0.88,"y":0.85},"hold":{"x":0.9,"y":0.6},"duration_ms":8000}
+   sample = a point exactly on the colour to follow (road surface just ahead) or, with avoid:true, to steer away from (obstacles, enemies). roi = the area ahead of the player. ref_x = where the player is horizontally.
+   control "buttons" holds your left or right button (hold = optional constant touch such as the gas pedal); "drag" slides a finger along height ctrl_y; "swipe" changes lane with swipes (lane_step = lane width).
+ {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85},"duration_ms":8000} taps the lowest object of that colour again and again (piano tiles, falling items, rhythm lanes).
+HOW TO PLAY:
+- Racing or driving: hold the gas (pedal or reflex hold) and steer with a steer reflex following the road colour; avoid traffic with a second reflex (avoid:true). Runners: swipe lanes (control swipe, avoid:true). Platformers and action: multi with direction held plus jump taps. Shooters: joystick swipe plus a held fire button.
+- Puzzle, card, board, match-3, turn-based: study the board, find the best move, tap precisely, wait for animations. Idle and clickers: bursts of taps, buy upgrades, collect rewards. Story and RPG: tap through dialogue, follow the quest marker.
+- state menu: press Play, Continue or Start. state loading: wait. state ad: find and tap the close X, Skip or Back. state game_over: restart and use the lesson. A popup asking for a rating or permission: dismiss or deny.
+- NEVER spend real money (Buy, Subscribe, Pay, Install, Update, anything with a price). Never type passwords or card data. A payment screen: press back. Wrong app in front: open_app. If the screen did not change after your last move, do something different.
+ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO dialog appears; no answer in a minute = your default): ask only when it truly matters to them: the first cutscene or long video (skip it?), a story choice that changes the outcome, something irreversible, spending a rare resource, deleting progress. Decide everything routine yourself. If "Standing answers" already has your key, apply it silently. When you ask, actions and reflex are ignored that turn.
+"done": true only when the goal is fully achieved or truly impossible. "say" stays empty except for a real milestone or problem: one short sentence in the user's language (Arabic or Darija if they use it). "next_ms": 1000 to 8000; short when using a reflex."""
 
     private fun mem(ctx: Context) = ctx.getSharedPreferences("jarvis_play_mem", Context.MODE_PRIVATE)
 
@@ -250,8 +236,8 @@ WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer 
         return try {
             val m = b.copy(Bitmap.Config.ARGB_8888, true)
             val c = Canvas(m)
-            val line = Paint().apply { color = Color.argb(75, 255, 255, 0); strokeWidth = 1f }
-            val txt = Paint().apply { color = Color.WHITE; textSize = m.width / 30f; isFakeBoldText = true; setShadowLayer(3f, 0f, 0f, Color.BLACK) }
+            val line = Paint().apply { color = Color.argb(55, 255, 255, 0); strokeWidth = 1f }
+            val txt = Paint().apply { color = Color.WHITE; textSize = m.width / 38f; isFakeBoldText = true; setShadowLayer(3f, 0f, 0f, Color.BLACK) }
             for (i in 1..9) {
                 val x = m.width * i / 10f
                 val y = m.height * i / 10f
@@ -400,6 +386,12 @@ WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer 
         for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
         var lastDecision = ""
         var reflexResult = ""
+        var reconDone = false
+        var knowledge = ""
+        var lastPlan = ""
+        var lastNarr = 0L
+        var lastTele = 0L
+        var parseFail = 0
         var errors = 0
         var turns = 0
         var unchanged = 0
@@ -437,7 +429,7 @@ WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer 
                 ownFront = 0
 
                 // free-tier friendly: never faster than one call every ~4.5 s
-                val gap = 4500 - (System.currentTimeMillis() - lastCall)
+                val gap = 4200 - (System.currentTimeMillis() - lastCall)
                 if (gap > 0) delay(gap)
                 lastCall = System.currentTimeMillis()
 
@@ -454,20 +446,45 @@ WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer 
                 }
                 if (unchanged >= 14) { ended = "Stopped playing $name: the screen has not changed for a while, so I may be stuck."; break }
 
+                // first turn of a session: work out WHAT game this is, WHERE we are and HOW it is controlled
+                if (!reconDone) {
+                    reconDone = true
+                    val rp = "App in front: $front\nUser's goal: $goal\nEarlier notes about this game: ${learned.ifBlank { "none" }}\n" +
+                        (if (text.isNotBlank()) "Screen text:\n$text\n" else "") + "Describe this screen precisely."
+                    var info: JSONObject? = null
+                    for (attempt in 1..2) {
+                        try {
+                            info = JSONObject(Brain.extractJson(brain.complete(RECON, rp, emptyList(), frame, json = true, play = true)))
+                            break
+                        } catch (e: CancellationException) { throw e } catch (e: Exception) { delay(3000) }
+                    }
+                    if (info != null) {
+                        val g = info.optString("game")
+                        knowledge = "Game: $g. Genre: ${info.optString("genre")}. Controls: ${info.optString("controls")}. Plan: ${info.optString("goal")}. Tips: ${info.optString("tips")}".take(1100)
+                        report(ctx, "I see: $g (${info.optString("genre")}), screen: ${info.optString("screen_state")}.\nControls: ${info.optString("controls")}\nPlan: ${info.optString("goal")}".take(900))
+                    } else {
+                        report(ctx, "[$name] I could not read the game screen yet. I will keep trying while I play.")
+                    }
+                    lastCall = 0L
+                    continue
+                }
+
                 val prompt = "GOAL: $goal\nApp in front: $front\nTurn: ${turns + 1}\n" +
-                    (if (learned.isNotBlank()) "Learned in earlier sessions about this game: $learned\n" else "") +
+                    "What I know about this game: ${knowledge.ifBlank { "nothing yet: work out the genre and the controls from the screenshot" }}\n" +
+                    (if (learned.isNotBlank()) "Learned in earlier sessions: $learned\n" else "") +
                     "Standing answers from the user: ${decisions.entries.joinToString { it.key + "=" + it.value }.ifBlank { "none" }}\n" +
-                    "My notes this session: ${note.ifBlank { "none yet: this is a new game, work out the genre and the controls" }}\n" +
+                    "My notes this session: ${note.ifBlank { "none" }}\n" +
                     "Recent steps: ${history.joinToString(" | ").ifBlank { "none" }}\n" +
+                    (if (lastPlan.isNotBlank()) "My previous plan was: $lastPlan. Did it work? Compare with what the screen shows now; if not, change approach.\n" else "") +
                     (if (lastDecision.isNotBlank()) "USER ANSWER: $lastDecision\n" else "") +
                     (if (reflexResult.isNotBlank()) "LAST REFLEX RESULT: $reflexResult\n" else "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
-                    "Look at the screenshot (grid labels are fractions of the screen) and decide."
+                    "Look at the screenshot and decide."
                 lastDecision = ""
                 reflexResult = ""
                 val raw = try {
-                    brain.complete(SYSTEM, prompt, emptyList(), frame, json = true)
+                    brain.complete(SYSTEM, prompt, emptyList(), frame, json = true, play = true)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) {
                     errors++
                     if (errors >= 6) { ended = "Stopped playing $name: the brain keeps failing (${e.message?.take(80) ?: "error"}). The free limit may be used up for now."; break }
@@ -475,8 +492,28 @@ WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer 
                     continue
                 }
                 errors = 0
-                val o = try { JSONObject(Brain.extractJson(raw)) } catch (e: Exception) { turns++; delay(2000); continue }
+                val o = try { JSONObject(Brain.extractJson(raw)) } catch (e: Exception) {
+                    parseFail++
+                    if (parseFail == 2) report(ctx, "[$name] The brain's last answers were unreadable. Retrying.")
+                    if (parseFail >= 5) { ended = "Stopped playing $name: the brain keeps returning unreadable answers."; break }
+                    delay(1500)
+                    continue
+                }
+                parseFail = 0
                 note = o.optString("note", note).take(700)
+                val see = o.optString("see", "").trim()
+                val plan = o.optString("plan", "").trim()
+                lastPlan = plan
+                val tn = System.currentTimeMillis()
+                if (see.isNotEmpty() && tn - lastNarr > 20_000) {
+                    lastNarr = tn
+                    val line = "[$name | ${o.optString("state", "?")}] $see -> $plan"
+                    ChatBus.publish("jarvis", line)
+                    if (tn - lastTele > 90_000) {
+                        lastTele = tn
+                        Engine.scope.launch(Dispatchers.IO) { try { Telegram.sendToOwner(Prefs(ctx), line) } catch (e: Exception) { /* ignore */ } }
+                    }
+                }
 
                 // a question for the user: YES or NO on the screen
                 val ask = o.optJSONObject("ask")
