@@ -277,6 +277,7 @@ object Reflex {
         var reason = "time up"
 
         while (System.currentTimeMillis() < c.deadline) {
+            if (Touch.paused) { val t0 = System.currentTimeMillis(); while (Touch.paused) delay(100); c.deadline += System.currentTimeMillis() - t0 }
             val nf = waitFrame(f.at)
             if (nf == null) { noFrame++; if (noFrame >= 6) { reason = "screenshots stopped"; break }; continue }
             noFrame = 0

@@ -44,6 +44,10 @@ object Touch {
 
     /** Why the pump stopped, if Android refused the touches (shown to the user and the AI). */
     @Volatile var problem: String = ""
+    /** True while the user is using the phone: every finger is lifted, nothing is sent, held fingers are remembered. */
+    @Volatile var paused = false
+    fun pause() { paused = true }
+    fun resume() { paused = false }
 
     private suspend fun awaitDone(d: CompletableDeferred<Unit>, ms: Long) {
         withTimeoutOrNull(ms.coerceAtLeast(500) + 3000) { d.await() }
@@ -55,10 +59,12 @@ object Touch {
         if (running) return
         val app = ctx.applicationContext
         problem = ""
+        paused = false
         job = Engine.scope.launch { pump(app) }
     }
 
     fun stop() {
+        paused = false
         job?.cancel()
         job = null
         synchronized(lock) {
@@ -219,6 +225,22 @@ object Touch {
         try {
             while (currentCoroutineContext().isActive) {
                 val svc = JarvisAccessibilityService.instance ?: break
+                if (paused) {
+                    if (cont.isNotEmpty()) {
+                        try {
+                            val lb = GestureDescription.Builder()
+                            for (name in cont.keys.toList()) {
+                                val at = contAt[name] ?: continue
+                                try { lb.addStroke(cont[name]!!.continueStroke(path(at[0], at[1]), 0, 15, false)) } catch (e: Exception) { /* ended */ }
+                            }
+                            svc.dispatchGesture(lb.build(), null, null)
+                        } catch (e: Exception) { /* ignore */ }
+                        cont.clear(); contAt.clear()
+                    }
+                    synchronized(lock) { queue.forEach { it.done?.complete(Unit) }; queue.clear() }
+                    delay(80)
+                    continue
+                }
                 val now = System.currentTimeMillis()
                 var due: List<Item> = emptyList()
                 var hs: Map<String, Hold> = emptyMap()
@@ -233,6 +255,7 @@ object Touch {
                 for (it in due) {
                     val off = (it.startAt - now).coerceAtLeast(0)
                     val p = Path().apply { moveTo(px(it.x1), py(it.y1)); if (it.x1 != it.x2 || it.y1 != it.y2) lineTo(px(it.x2), py(it.y2)) }
+                    UserWatch.own(now + off)
                     strokes.add(GestureDescription.StrokeDescription(p, off, it.dur))
                     len = maxOf(len, off + it.dur)
                 }
@@ -267,11 +290,13 @@ object Touch {
                         } else {
                             // jump: lift the old position briefly, press the new one a moment later
                             try { strokes.add(prev.continueStroke(path(at[0], at[1]), 0, 15, false)) } catch (e: Exception) { /* ignore */ }
+                            UserWatch.own(now + 40)
                             val s = GestureDescription.StrokeDescription(path(tx, ty), 40, (glen - 40).coerceAtLeast(40), true)
                             cont[name] = s; contAt[name] = floatArrayOf(tx, ty); strokes.add(s)
                             continue
                         }
                     }
+                    UserWatch.own(now)
                     val s = GestureDescription.StrokeDescription(path(tx, ty), 0, glen.coerceAtLeast(SEG), true)
                     cont[name] = s; contAt[name] = floatArrayOf(tx, ty); strokes.add(s)
                 }

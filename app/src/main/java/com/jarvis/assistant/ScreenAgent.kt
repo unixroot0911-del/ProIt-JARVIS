@@ -25,9 +25,11 @@ class JarvisAccessibilityService : AccessibilityService() {
         @Volatile var instance: JarvisAccessibilityService? = null
     }
 
-    override fun onServiceConnected() { instance = this }
-    override fun onUnbind(intent: Intent?): Boolean { instance = null; return super.onUnbind(intent) }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onServiceConnected() { instance = this; UserWatch.install(this) }
+    override fun onUnbind(intent: Intent?): Boolean { UserWatch.remove(this); instance = null; return super.onUnbind(intent) }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_TOUCH_INTERACTION_START) UserWatch.onTouch()
+    }
     override fun onInterrupt() {}
 
     fun dump(): ScreenDump? {
@@ -150,6 +152,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             val p = android.graphics.Path().apply { moveTo(x, y) }
             val g = android.accessibilityservice.GestureDescription.Builder()
                 .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(p, 0, 60)).build()
+            UserWatch.own()
             dispatchGesture(g, null, null)
         } catch (e: Exception) { false }
     }

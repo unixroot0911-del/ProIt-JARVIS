@@ -55,7 +55,7 @@ object Steps {
         suspendCancellableCoroutine { cont ->
             try {
                 val b = GestureDescription.Builder()
-                strokes.forEach { b.addStroke(it) }
+                strokes.forEach { UserWatch.own(System.currentTimeMillis() + it.startTime); b.addStroke(it) }
                 val ok = svc.dispatchGesture(b.build(), object : AccessibilityService.GestureResultCallback() {
                     override fun onCompleted(g: GestureDescription?) { if (cont.isActive) cont.resume(true) }
                     override fun onCancelled(g: GestureDescription?) { if (cont.isActive) cont.resume(false) }
@@ -96,6 +96,11 @@ object Steps {
 
     suspend fun exec(ctx: Context, svc: JarvisAccessibilityService, o: JSONObject, jitter: Boolean): Boolean {
         val kindStr = (o.optString("do").ifBlank { o.optString("type") }).lowercase()
+        while (Touch.paused) delay(150)
+        if (kindStr == "tap_text" || kindStr == "click_text" || kindStr == "tap_label" || kindStr == "tap_button") {
+            return TextTap.tap(svc, o.optString("text").ifBlank { o.optString("label") }, o.optInt("nth", 0), o.optBoolean("exact", false))
+        }
+        if (kindStr == "wait_text") return TextTap.waitFor(svc, o.optString("text"), o.optLong("ms", 6000))
         if (kindStr in pumpOnly || (Touch.heldNames().isNotEmpty() && kindStr in pumpable)) {
             if (!Touch.running) Touch.start(ctx)
             return Touch.exec(ctx, kindStr, o, jitter)
@@ -222,6 +227,7 @@ Respond ONLY with compact JSON:
 A "multi" step with timed touches ("at" delays) schedules a whole predicted sequence in advance: for example hold the gas for 6 s, a light steer at 1.5 s and a counter-steer at 3 s. Gentle bends need short light presses (80 to 150 ms), sharp ones longer presses (300 ms and more). A steer reflex with "roi_far" anticipates bends on its own.
 "interrupt": true only when the plan still running must be cancelled right now (danger). "layout": whenever you see a screen state whose button positions are missing from the remembered controls, or they changed: {"gameplay":"gas (0.88,0.8), brake (0.75,0.85), left (0.1,0.85), right (0.25,0.85)"}; they are kept so you recognise them instantly next time. "lesson": after a loss, a mistake or a discovery, one reusable sentence (what happened, what to do differently); it is kept for every future play of this game.
 Coordinates are fractions 0..1 (x from the left, y from the top). Aim at the CENTER of the target.
+TEXT STEPS (prefer these whenever the button's words are visible on the screen or in the Screen text list; they find the button wherever it is): {"do":"tap_text","text":"Play"} (add "nth":1 for the second match, "exact":true for a whole-word match) and {"do":"wait_text","text":"Continue","ms":6000} waits until that text appears. Use coordinates only when the target has no words (game objects, icons, joysticks).
 STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800} {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300} (long ms = drag or joystick push)
  {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..} {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
  {"do":"multi","touches":[{"x":0.9,"y":0.8,"at":0,"ms":3000},{"x":0.1,"y":0.8,"at":500,"ms":300}]} = several fingers at once ("at" = start delay ms, "ms" = duration, optional x2,y2 slides that finger). Use it to hold gas or fire while steering.
@@ -339,8 +345,10 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     @Volatile private var stepTrace = 0
 
     private suspend fun execActions(ctx: Context, svc: JarvisAccessibilityService, acts: JSONArray) {
+        val ep = UserWatch.epoch
         for (i in 0 until minOf(acts.length(), 12)) {
             currentCoroutineContext().ensureActive()
+            if (UserWatch.epoch != ep) return
             val st = acts.optJSONObject(i) ?: continue
             var res = "ok"
             try { if (!Steps.exec(ctx, svc, st, jitter = true)) res = "REFUSED by Android" } catch (e: CancellationException) { throw e } catch (e: Exception) { res = "ERROR " + (e.message ?: e.toString()).take(80); Diag.record(e) }
@@ -391,6 +399,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     }
 
     private fun notifyOn(ctx: Context, text: String) {
+        UserWatch.arm(null)
         try {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val ch = NotificationChannel(CH, "Jarvis playing", NotificationManager.IMPORTANCE_LOW)
@@ -410,6 +419,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     }
 
     private fun notifyOff(ctx: Context) {
+        UserWatch.disarm()
         try { (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NID) } catch (e: Exception) { /* ignore */ }
     }
 
@@ -520,6 +530,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val scope = CoroutineScope(currentCoroutineContext())
         Touch.start(ctx)
         stepTrace = 0
+        UserWatch.arm(pkg)
         var hubOn = false
         try { JarvisAccessibilityService.instance?.let { Hub.acquire(it); hubOn = true } } catch (e: Exception) { Diag.record(e) }
         var execJob: Job? = null
@@ -543,6 +554,9 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         var emptyTurns = 0
         var errors = 0
         var turns = 0
+        var wasPaused = false
+        var pausedSince = 0L
+        var resumed = false
         var blind = 0
         var traced = 0
         var unchanged = 0
@@ -565,7 +579,17 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 val svc = JarvisAccessibilityService.instance
                 if (svc == null) { ended = "Stopped playing $name: the screen agent was switched off."; break }
 
+                // the user took over: freeze, remember, and carry on from the same point afterwards
+                if (Touch.paused) {
+                    if (!wasPaused) { wasPaused = true; pausedSince = now; try { execJob?.cancel() } catch (e: Exception) { /* ignore */ }; unchanged = 0 }
+                    if (now - pausedSince > 900_000) { ended = "Stopped playing $name: you have been using the phone for a long time."; break }
+                    lastProgress = now
+                    delay(250)
+                    continue
+                }
+                if (wasPaused) { wasPaused = false; resumed = true; prev = null; unchanged = 0; lastCall = 0L }
                 val front = svc.rootInActiveWindow?.packageName?.toString() ?: ""
+                if (front.contains("systemui", true)) { delay(400); continue }
                 // never stay silent: say what is blocking me
                 if (now - lastProgress > 35_000 && now - lastWatch > 35_000) {
                     lastWatch = now
@@ -670,8 +694,10 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     (if (emptyTurns >= 2) "WARNING: I made no move for $emptyTurns turns. I MUST act now: tap the most likely Play, Start, Continue or Tap-to-start button, or the middle of the screen.\n" else "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
+                    (if (resumed) "The user just used the phone and gave it back to me: the screen may have changed. My held fingers were put back where they were. Look carefully, then continue from where I was.\n" else "") +
                     "Look at the screenshot, think ahead, and decide."
                 lastDecision = ""
+                resumed = false
                 reflexResult = ""
                 val raw = try {
                     brain.complete(SYSTEM, prompt, emptyList(), frame, json = true, play = true)
@@ -906,7 +932,7 @@ object Macros {
     private const val SYSTEM = """You write a MACRO for an Android phone: a short list of touch steps that Jarvis replays again and again.
 You may receive a screenshot of the screen the macro starts on. Coordinates are fractions 0..1 of screen width and height from the top-left; aim at the CENTER of each target.
 Respond ONLY with JSON: {"summary":"one line","loop_wait_ms":1000,"jitter":true,"steps":[ ... ]}
-Step types: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800}
+Step types: {"do":"tap_text","text":"visible button text"} (preferred when the button has words) {"do":"wait_text","text":"..","ms":5000} {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800}
 {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300} {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..}
 {"do":"wait","ms":1000} {"do":"back"} {"do":"home"} {"do":"open_app","app":"name"}
 The steps form ONE round; Jarvis repeats the round. Include waits where the app needs time. Maximum 40 steps. Never include purchases, payments or passwords."""
