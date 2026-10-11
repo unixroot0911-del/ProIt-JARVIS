@@ -141,6 +141,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         tapping targets, holding the gas while steering with several fingers), and asks the user YES or NO on the screen only when it truly matters (a cutscene, a story choice,
         something irreversible), deciding everything else itself. It remembers what it learned about each game for next time.
         Never spend money in a game. If the game is online multiplayer, add one short warning that automation can get an account banned, then do it anyway.
+        "keep playing", "play it", "start it", "continue", "the current game" with no name = play with an EMPTY app name (arg "||"): it plays whatever is open on the screen.
+        Never ask which game when one was just opened or talked about: use its name.
         A repeated task at a time ("every night at 22:00 play X for 30 minutes") is schedule_task. Never say you cannot play: start it.
         "Watch me while I do X" means watch_start with X as the arg: confirm in one short line, do not refuse.
         Watching sees the phone screen, not the user's body or room; for that, tell them to tap LOOK for a photo.

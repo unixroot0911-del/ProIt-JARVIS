@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.random.Random
@@ -39,11 +40,19 @@ object Touch {
 
     private const val SEG = 320L
 
+    /** Why the pump stopped, if Android refused the touches (shown to the user and the AI). */
+    @Volatile var problem: String = ""
+
+    private suspend fun awaitDone(d: CompletableDeferred<Unit>, ms: Long) {
+        withTimeoutOrNull(ms.coerceAtLeast(500) + 3000) { d.await() }
+    }
+
     fun heldNames(): List<String> = synchronized(lock) { holds.keys.toList() }
 
     fun start(ctx: Context) {
         if (running) return
         val app = ctx.applicationContext
+        problem = ""
         job = Engine.scope.launch { pump(app) }
     }
 
@@ -99,11 +108,11 @@ object Touch {
             "hold_on", "press_and_keep" -> { hold(o.optString("name", "finger"), f("x"), f("y")); return true }
             "hold_off", "release" -> { if (o.optString("name").isBlank()) releaseAll() else release(o.optString("name")); return true }
             "release_all" -> { releaseAll(); return true }
-            "tap", "click" -> { val d = CompletableDeferred<Unit>(); press(f("x"), f("y"), 55, 0, d); d.await(); return true }
+            "tap", "click" -> { val d = CompletableDeferred<Unit>(); press(f("x"), f("y"), 55, 0, d); awaitDone(d, 100); return true }
             "double_tap" -> {
                 val x = f("x"); val y = f("y")
                 val d = CompletableDeferred<Unit>()
-                press(x, y, 45, 0); press(x, y, 45, 120, d); d.await(); return true
+                press(x, y, 45, 0); press(x, y, 45, 120, d); awaitDone(d, 250); return true
             }
             "repeat_tap", "rapid_tap", "spam_tap" -> {
                 val n = o.optInt("count", 10).coerceIn(1, 400)
@@ -115,13 +124,13 @@ object Touch {
                     press(x + (if (jitter) j() * 0.5f else 0f), y + (if (jitter) j() * 0.5f else 0f), 30, i * gap, d)
                     if (d != null) last = d
                 }
-                last?.await()
+                last?.let { awaitDone(it, n * gap) }
                 return true
             }
             "hold", "long_press" -> {
                 val x = f("x"); val y = f("y")
                 val total = ms("ms", 800)
-                if (total <= 900) { val d = CompletableDeferred<Unit>(); press(x, y, total, 0, d); d.await() }
+                if (total <= 900) { val d = CompletableDeferred<Unit>(); press(x, y, total, 0, d); awaitDone(d, total) }
                 else { hold("tmp_long", x, y); delay(total.coerceAtMost(60_000)); release("tmp_long"); delay(60) }
                 return true
             }
@@ -129,7 +138,7 @@ object Touch {
                 val total = ms("ms", 300).coerceAtLeast(60)
                 if (total <= 900) {
                     val d = CompletableDeferred<Unit>()
-                    swipe(f("x1"), f("y1"), f("x2"), f("y2"), total, 0, d); d.await()
+                    swipe(f("x1"), f("y1"), f("x2"), f("y2"), total, 0, d); awaitDone(d, total)
                 } else {
                     // a long drag (joystick push): finger down at the start, slide to the end, stay a moment, lift
                     hold("tmp_drag", f("x1"), f("y1")); delay(120)
@@ -144,7 +153,7 @@ object Touch {
                 val a = if (out) near else far
                 val b = if (out) far else near
                 val d = CompletableDeferred<Unit>()
-                swipe(cx - a, cy, cx - b, cy, 450, 0); swipe(cx + a, cy, cx + b, cy, 450, 0, d); d.await()
+                swipe(cx - a, cy, cx - b, cy, 450, 0); swipe(cx + a, cy, cx + b, cy, 450, 0, d); awaitDone(d, 600)
                 return true
             }
             "multi" -> {
@@ -170,7 +179,7 @@ object Touch {
                     }
                     if (at + total > lastEnd) lastEnd = at + total
                 }
-                lastD?.await()
+                lastD?.let { awaitDone(it, lastEnd) }
                 if (lastEnd > 900) delay(0)
                 return true
             }
@@ -198,6 +207,7 @@ object Touch {
         val h = dm.heightPixels.toFloat()
         fun px(x: Float) = (x * w).coerceIn(1f, w - 1)
         fun py(y: Float) = (y * h).coerceIn(1f, h - 1)
+        var fails = 0
         try {
             while (job?.isActive == true) {
                 val svc = JarvisAccessibilityService.instance ?: break
@@ -263,6 +273,13 @@ object Touch {
                 for (s in strokes.take(10)) b.addStroke(s)
                 val ok = dispatch(svc, b.build())
                 if (!ok) { cont.clear(); contAt.clear() }   // the system cancelled it: every finger was lifted
+                if (ok) fails = 0 else {
+                    fails++
+                    if (fails >= 8) {
+                        problem = "Android keeps refusing my touches. Open Settings > Accessibility, turn Jarvis off and on again, then ask me again."
+                        break
+                    }
+                }
                 due.forEach { it.done?.complete(Unit) }
                 if (!ok) delay(60)
             }

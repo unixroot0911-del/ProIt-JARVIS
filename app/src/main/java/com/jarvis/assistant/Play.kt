@@ -37,6 +37,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -191,11 +192,15 @@ object Player {
     private const val CH = "jarvis_play"
     private const val NID = 7001
 
+    /** Only a real checkout is a payment screen; ordinary menus with words like "buy" or "subscribe" are NOT. */
     private val payRx = Regex(
-        "(confirm (?:your )?(?:purchase|payment|order)|buy now|subscribe|subscription|pay now|place order|add payment|payment method|" +
-            "اشترِ الآن|اشتر الآن|تأكيد الشراء|ادفع|الدفع|اشتراك|confirmer l'achat|acheter)",
+        "(confirm (?:your )?(?:purchase|payment|order)|confirm and pay|authorize (?:the )?(?:payment|purchase)|تأكيد الشراء|تأكيد الدفع|confirmer (?:l'achat|le paiement))",
         RegexOption.IGNORE_CASE
     )
+
+    private fun paymentScreen(front: String, text: String): Boolean =
+        front == "com.android.vending" || front.contains("billing", true) || front.contains("wallet", true) ||
+            front.contains("paypal", true) || payRx.containsMatchIn(text)
 
     private const val RECON = """You are JARVIS, an expert gamer. Look at this phone screenshot (a thin yellow grid labelled 0.1 to 0.9 gives exact coordinates) and work out where you are.
 Respond ONLY with JSON:
@@ -235,6 +240,7 @@ HOW TO PLAY:
 - DRIVING, step by step: 1) find the gas control (none if the car accelerates by itself) and put a finger on it with hold; 2) start a steer controller on the road colour with a hazard colour for walls, grass and edges, and "roi_far" for bends; 3) use brake or nitro as plain steps; 4) each turn read the CONTROLLERS status and the road ahead, refine the points, and never let go of the gas between decisions. The same pattern works for flying, running, boats and any game with continuous movement.
 - Survival, building and open-world games: set milestones (gather wood and stone, craft tools, build shelter, find food and water, watch health and night), keep an eye on the status bars, retreat or heal before danger, and change the plan as the situation changes. Shooters and fighters: learn enemy patterns and adapt.
 - Do not run a fixed loop. If the same routine repeats without progress, change the strategy.
+- A start, title, home or menu screen: press the biggest Play, Start, Tap-to-start or Continue button right away. Never answer with no actions unless the state is loading or a controller is running: an idle phone loses the game. If no button is clear, tap the middle of the screen.
 - NEVER spend real money (Buy, Subscribe, Pay, Install, Update, anything with a price). Never type passwords or card data. A payment screen: press back. Wrong app in front: open_app. If the screen did not change after your last move, do something different.
 ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO dialog appears; no answer in a minute = your default): ask only when it truly matters to them: the first cutscene or long video (skip it?), a story choice that changes the outcome, something irreversible, spending a rare resource, deleting progress. Decide everything routine yourself. If "Standing answers" already has your key, apply it silently. When you ask, actions and reflex are ignored that turn.
 "done": true only when the goal is fully achieved or truly impossible. "say" stays empty except for a real milestone or problem: one short sentence in the user's language (Arabic or Darija if they use it). "next_ms": 1000 to 8000; short when using a reflex."""
@@ -523,6 +529,11 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         var lastNarr = 0L
         var lastTele = 0L
         var parseFail = 0
+        var payHits = 0
+        var blocker = ""
+        var lastProgress = started
+        var lastWatch = 0L
+        var emptyTurns = 0
         var errors = 0
         var turns = 0
         var unchanged = 0
@@ -547,8 +558,14 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 if (svc == null) { ended = "Stopped playing $name: the screen agent was switched off."; break }
 
                 val front = svc.rootInActiveWindow?.packageName?.toString() ?: ""
+                // never stay silent: say what is blocking me
+                if (now - lastProgress > 35_000 && now - lastWatch > 35_000) {
+                    lastWatch = now
+                    report(ctx, "[$name] No move yet. Front app: ${front.ifBlank { "unknown" }}. ${Touch.problem.ifBlank { blocker }.ifBlank { "Waiting for the brain's answer." }}")
+                }
                 if (front == ctx.packageName || front.contains("launcher", true) || front.contains("systemui", true)) {
                     ownFront++
+                    blocker = "The game is not in front (I see ${front.ifBlank { "nothing" }}); reopening it."
                     if (pkg != null && ownFront % 2 == 0) {
                         reopen++
                         if (reopen > 8) { ended = "Stopped playing $name: I could not stay inside the game."; break }
@@ -568,7 +585,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
 
                 val bmp = if (Build.VERSION.SDK_INT >= 30) (Hub.fresh(1000) ?: Shots.take(svc)) else null
                 val text = svc.dump()?.text.orEmpty().take(1200)
-                if (payRx.containsMatchIn(text)) { execJob?.cancel(); svc.back(); delay(1500); continue }   // never linger on a payment screen
+                if (paymentScreen(front, text)) {
+                    payHits++
+                    blocker = "A payment screen is in front; I pressed back."
+                    if (payHits == 1) report(ctx, "[$name] A payment or store screen appeared: I am going back, I never pay.")
+                    execJob?.cancel(); svc.back(); delay(1500)
+                    if (payHits > 8) { ended = "Stopped playing $name: it keeps opening payment screens."; break }
+                    continue
+                }
+                payHits = 0
                 var frame: String? = null
                 if (bmp != null) {
                     val sg = sig(bmp)
@@ -625,6 +650,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     (if (lastDecision.isNotBlank()) "USER ANSWER: $lastDecision\n" else "") +
                     (Reflex.statusText().let { if (it.isNotBlank()) "CONTROLLERS AND HELD FINGERS: $it\n" else "" }) +
                     (sp.getString("ctl:$memKey", null)?.let { "Controller recipe I used last time in this game (reuse it if it fits; adapt the points to this screenshot): $it\n" } ?: "") +
+                    (if (emptyTurns >= 2) "WARNING: I made no move for $emptyTurns turns. I MUST act now: tap the most likely Play, Start, Continue or Tap-to-start button, or the middle of the screen.\n" else "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
                     "Look at the screenshot, think ahead, and decide."
@@ -634,6 +660,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     brain.complete(SYSTEM, prompt, emptyList(), frame, json = true, play = true)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) {
                     errors++
+                    blocker = "Brain error: ${e.message?.take(120)}"
+                    report(ctx, "[$name] Brain error ($errors/6): ${e.message?.take(140)}")
                     if (errors >= 6) { ended = "Stopped playing $name: the brain keeps failing (${e.message?.take(80) ?: "error"}). The free limit may be used up for now."; break }
                     delay(15_000L * errors)
                     continue
@@ -647,6 +675,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     continue
                 }
                 parseFail = 0
+                lastProgress = System.currentTimeMillis()
+                blocker = ""
                 note = o.optString("note", note).take(700)
                 val see = o.optString("see", "").trim()
                 val plan = o.optString("plan", "").trim()
@@ -707,7 +737,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 val acts: JSONArray = o.optJSONArray("actions") ?: JSONArray()
                 val rf = o.opt("reflex")
                 if (o.optBoolean("interrupt", false)) execJob?.cancel()
-                execJob?.join()
+                if (withTimeoutOrNull(12_000) { execJob?.join(); true } == null) execJob?.cancel()
                 var summary = (0 until acts.length()).mapNotNull { acts.optJSONObject(it)?.let { s -> s.optString("do").ifBlank { s.optString("type") } } }.joinToString(",")
                 // fingers that stay down between decisions
                 o.optJSONObject("hold")?.let { hh ->
@@ -731,13 +761,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     execJob = scope.launch { try { execActions(ctx, svc, acts) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* ignore */ } }
                 }
                 nextAt = System.currentTimeMillis() + o.optLong("next_ms", 2000).coerceIn(800, 8000)
+                val didSomething = acts.length() > 0 || (rf != null && rf != JSONObject.NULL) || o.optJSONObject("hold") != null
+                emptyTurns = if (didSomething || lastState == "loading" || o.optBoolean("done", false)) 0 else emptyTurns + 1
                 turns++
                 history.addLast("t$turns:$summary")
                 while (history.size > 5) history.removeFirst()
                 if (turns % 5 == 0 && note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply()
 
                 val say = o.optString("say", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
-                if (o.optBoolean("done", false)) { execJob?.join(); ended = say ?: "Done: the goal in $name is complete."; break }
+                if (o.optBoolean("done", false)) { withTimeoutOrNull(12_000) { execJob?.join() }; ended = say ?: "Done: the goal in $name is complete."; break }
                 val t = System.currentTimeMillis()
                 if (say != null && t - lastSay > 120_000) { lastSay = t; report(ctx, "[$name] $say") }
                 else if (t - lastReport > 10 * 60_000L) { lastReport = t; report(ctx, "Still playing $name: ${(t - started) / 60_000} min, $turns turns. ${note.take(120)}") }
