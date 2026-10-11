@@ -93,6 +93,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "stop_agent" (arg = "" or "all": stops the screen agent, any game being played and any macro; "all" also stops live watching),
               "play" (arg = "app or game name|what to do (optional)|how long (optional, e.g. 30 minutes, 2 hours, 100 times, forever)":
                   Jarvis really plays the game or uses the app by itself with real touches, looking at the screen and deciding every move; the user can ask again as many times as they want),
+              "play_memory" (arg = game or app name: tells what Jarvis remembers about it: controls, lessons, how often it played),
               "play_forget" (arg = game or app name, or blank for all: forgets what Jarvis learned about that game and the user's standing yes/no answers, so it asks again),
               "macro_create" (arg = "macro name|exactly what the touch routine does": saves a repeatable touch routine, e.g. tapping a button, swiping in a pattern, daily chores in an app),
               "macro_run" (arg = "macro name|how long or how many times, or forever": replays a saved macro with no AI and no limit),

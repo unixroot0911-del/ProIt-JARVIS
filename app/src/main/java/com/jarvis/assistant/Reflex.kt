@@ -8,6 +8,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -24,12 +26,7 @@ object Reflex {
     private class Small(val w: Int, val h: Int, val px: IntArray)
 
     /** Android allows a screenshot only every ~1/3 s. */
-    private suspend fun grab(svc: JarvisAccessibilityService): Bitmap? {
-        val wait = 360 - (System.currentTimeMillis() - lastShot)
-        if (wait > 0) delay(wait)
-        lastShot = System.currentTimeMillis()
-        return svc.screenshot()
-    }
+    private suspend fun grab(svc: JarvisAccessibilityService): Bitmap? = Shots.take(svc)
 
     private fun small(b: Bitmap): Small {
         val w = 96
@@ -89,6 +86,15 @@ object Reflex {
         val y1 = (ry1 * sm.h).toInt().coerceIn(0, sm.h - 2)
         val y2 = (ry2 * sm.h).toInt().coerceIn(y1 + 1, sm.h)
         val area = ((x2 - x1) * (y2 - y1)).coerceAtLeast(1)
+        // optional second region further ahead: lets the steering anticipate a bend before the car reaches it
+        val far: IntArray? = spec.optJSONObject("roi_far")?.let {
+            intArrayOf(
+                (it.optDouble("x1", 0.2) * sm.w).toInt().coerceIn(0, sm.w - 2),
+                (it.optDouble("y1", 0.3) * sm.h).toInt().coerceIn(0, sm.h - 2),
+                (it.optDouble("x2", 0.8) * sm.w).toInt().coerceIn(1, sm.w),
+                (it.optDouble("y2", 0.45) * sm.h).toInt().coerceIn(1, sm.h)
+            )
+        }?.takeIf { it[2] > it[0] && it[3] > it[1] }
 
         val started = System.currentTimeMillis()
         var ticks = 0
@@ -153,7 +159,23 @@ object Reflex {
                 covSum += cov
                 var err = 0f
                 if (!avoid) {
-                    if (cov < 0.004f) lost++ else { lost = 0; err = cx - ref }
+                    if (cov < 0.004f) lost++ else {
+                        lost = 0
+                        err = cx - ref
+                        if (far != null) {
+                            var fn = 0
+                            var fsx = 0L
+                            for (fy in far[1] until far[3]) {
+                                val frow = fy * sm.w
+                                for (fx in far[0] until far[2]) if (near(sm.px[frow + fx], target, tol)) { fn++; fsx += fx }
+                            }
+                            val fcov = fn.toFloat() / ((far[2] - far[0]) * (far[3] - far[1])).coerceAtLeast(1)
+                            if (fcov >= 0.004f) {
+                                val fcx = (fsx.toFloat() / fn + 0.5f) / sm.w
+                                err = 0.55f * err + 0.45f * (fcx - ref)   // the bend ahead pulls the steering early and gently
+                            }
+                        }
+                    }
                 } else {
                     lost = 0
                     if (cov >= 0.01f) {
@@ -184,7 +206,7 @@ object Reflex {
                         else -> {
                             val b = spec.optJSONObject(if (err < 0) "left" else "right")
                             if (b != null) {
-                                val ms = (80 + abs(err) * 1000).toLong().coerceIn(70, tick - 20)
+                                val ms = (70 + abs(err) * 900).toLong().coerceIn(60, tick - 20)
                                 t.put(touch(b.optDouble("x", 0.5), b.optDouble("y", 0.8), ms, 10))
                                 if (err < 0) l++ else r++
                             } else s++
@@ -209,5 +231,18 @@ object Reflex {
         val secs = (System.currentTimeMillis() - started) / 1000.0
         return if (kind == "tap_color") "Reflex tap_color ran ${"%.1f".format(secs)}s: $ticks ticks, $taps taps. Ended: $ended."
         else "Reflex steer ran ${"%.1f".format(secs)}s: $ticks ticks, left $l, right $r, straight $s, target coverage ${(covSum / ticks.coerceAtLeast(1) * 100).toInt()}%. Ended: $ended."
+    }
+}
+
+/** One screenshot at a time, never closer than Android allows (about a third of a second), shared by the player and the reflexes. */
+object Shots {
+    private val lock = Mutex()
+    @Volatile private var last = 0L
+
+    suspend fun take(svc: JarvisAccessibilityService): Bitmap? = lock.withLock {
+        val wait = 360 - (System.currentTimeMillis() - last)
+        if (wait > 0) delay(wait)
+        last = System.currentTimeMillis()
+        svc.screenshot()
     }
 }

@@ -26,6 +26,8 @@ import android.os.Build
 import android.os.PowerManager
 import android.view.accessibility.AccessibilityNodeInfo
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -197,9 +199,15 @@ Respond ONLY with JSON:
 Be concrete and specific. Never answer with generic words: describe what is really on this screen."""
 
     private const val SYSTEM = """You are JARVIS, an expert gamer playing on the user's Android phone with real touches. Each turn you get a screenshot (a thin yellow grid labelled 0.1 to 0.9 gives exact coordinates), the GOAL, and what you already know about this game.
-LOOK first, then decide. Respond ONLY with compact JSON:
-{"state":"menu|cutscene|dialog|gameplay|ad|loading|game_over|other","see":"one sentence: what is on screen and where your character or vehicle is","plan":"one sentence: your next move and why",
- "actions":[ up to 10 steps ],"reflex":null,"ask":null,"note":"memory, max 400 characters: controls with coordinates, rules and lessons learned, progress","next_ms":1500,"say":"","done":false}
+THINK AHEAD. Your answer takes a few seconds and the game keeps running, so never only react to the picture: predict what the screen will look like 3 to 10 seconds from now (a bend coming up, an enemy walking closer, a timer ending, hunger or health dropping, a resource running out) and prepare for it now. Your plan is executed while you already start thinking about the next one.
+Respond ONLY with compact JSON:
+{"state":"menu|cutscene|dialog|gameplay|ad|loading|game_over|other","see":"one sentence: what is on screen and where your character or vehicle is",
+ "ahead":"what you expect in the next 3 to 10 seconds and how you prepare (for example: gentle right bend in about 1.5 s, so one short light steer, then straight)",
+ "plan":"one sentence: what you do now","strategy":"your overall approach and next milestones; CHANGE it when it stops working, never repeat a failing routine",
+ "actions":[ up to 10 steps ],"reflex":null,"ask":null,"interrupt":false,"layout":null,"lesson":"",
+ "note":"memory, max 400 characters: rules and progress","next_ms":1500,"say":"","done":false}
+A "multi" step with timed touches ("at" delays) schedules a whole predicted sequence in advance: for example hold the gas for 6 s, a light steer at 1.5 s and a counter-steer at 3 s. Gentle bends need short light presses (80 to 150 ms), sharp ones longer presses (300 ms and more). A steer reflex with "roi_far" anticipates bends on its own.
+"interrupt": true only when the plan still running must be cancelled right now (danger). "layout": whenever you see a screen state whose button positions are missing from the remembered controls, or they changed: {"gameplay":"gas (0.88,0.8), brake (0.75,0.85), left (0.1,0.85), right (0.25,0.85)"}; they are kept so you recognise them instantly next time. "lesson": after a loss, a mistake or a discovery, one reusable sentence (what happened, what to do differently); it is kept for every future play of this game.
 Coordinates are fractions 0..1 (x from the left, y from the top). Aim at the CENTER of the target.
 STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800} {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300} (long ms = drag or joystick push)
  {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..} {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
@@ -208,16 +216,117 @@ REFLEX = a fast loop on the phone (about 3 times a second, no waiting for you) f
  {"kind":"steer","sample":{"x":0.5,"y":0.78},"roi":{"x1":0.2,"y1":0.45,"x2":0.8,"y2":0.78},"ref_x":0.5,"avoid":false,"control":"buttons","left":{"x":0.12,"y":0.85},"right":{"x":0.88,"y":0.85},"hold":{"x":0.9,"y":0.6},"duration_ms":8000}
    sample = a point exactly on the colour to follow (road surface just ahead) or, with avoid:true, to steer away from (obstacles, enemies). roi = the area ahead of the player. ref_x = where the player is horizontally.
    control "buttons" holds your left or right button (hold = optional constant touch such as the gas pedal); "drag" slides a finger along height ctrl_y; "swipe" changes lane with swipes (lane_step = lane width).
+   add "roi_far":{"x1":0.3,"y1":0.3,"x2":0.7,"y2":0.45} (the road further ahead) so the car turns early and gently into a bend it can already see.
  {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85},"duration_ms":8000} taps the lowest object of that colour again and again (piano tiles, falling items, rhythm lanes).
 HOW TO PLAY:
 - Racing or driving: hold the gas (pedal or reflex hold) and steer with a steer reflex following the road colour; avoid traffic with a second reflex (avoid:true). Runners: swipe lanes (control swipe, avoid:true). Platformers and action: multi with direction held plus jump taps. Shooters: joystick swipe plus a held fire button.
 - Puzzle, card, board, match-3, turn-based: study the board, find the best move, tap precisely, wait for animations. Idle and clickers: bursts of taps, buy upgrades, collect rewards. Story and RPG: tap through dialogue, follow the quest marker.
 - state menu: press Play, Continue or Start. state loading: wait. state ad: find and tap the close X, Skip or Back. state game_over: restart and use the lesson. A popup asking for a rating or permission: dismiss or deny.
+- Survival, building and open-world games: set milestones (gather wood and stone, craft tools, build shelter, find food and water, watch health and night), keep an eye on the status bars, retreat or heal before danger, and change the plan as the situation changes. Shooters and fighters: learn enemy patterns and adapt.
+- Do not run a fixed loop. If the same routine repeats without progress, change the strategy.
 - NEVER spend real money (Buy, Subscribe, Pay, Install, Update, anything with a price). Never type passwords or card data. A payment screen: press back. Wrong app in front: open_app. If the screen did not change after your last move, do something different.
 ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO dialog appears; no answer in a minute = your default): ask only when it truly matters to them: the first cutscene or long video (skip it?), a story choice that changes the outcome, something irreversible, spending a rare resource, deleting progress. Decide everything routine yourself. If "Standing answers" already has your key, apply it silently. When you ask, actions and reflex are ignored that turn.
 "done": true only when the goal is fully achieved or truly impossible. "say" stays empty except for a real milestone or problem: one short sentence in the user's language (Arabic or Darija if they use it). "next_ms": 1000 to 8000; short when using a reflex."""
 
     private fun mem(ctx: Context) = ctx.getSharedPreferences("jarvis_play_mem", Context.MODE_PRIVATE)
+
+    private fun sizeSig(ctx: Context): String {
+        val d = ctx.resources.displayMetrics
+        return "${d.widthPixels}x${d.heightPixels}"
+    }
+
+    /** Remembered button positions per screen state (menu, gameplay...). Only valid for the same screen size. */
+    private fun loadScreens(sp: SharedPreferences, key: String, size: String): JSONObject {
+        val raw = sp.getString("layout:$key", null) ?: return JSONObject()
+        return try {
+            val o = JSONObject(raw)
+            if (o.optString("size") == size) (o.optJSONObject("screens") ?: JSONObject()) else JSONObject()
+        } catch (e: Exception) { JSONObject() }
+    }
+
+    private fun saveScreens(sp: SharedPreferences, key: String, size: String, screens: JSONObject) {
+        sp.edit().putString("layout:$key", JSONObject().put("size", size).put("screens", screens).toString()).apply()
+    }
+
+    private fun screensText(s: JSONObject): String {
+        val l = ArrayList<String>()
+        for (k in s.keys()) l.add("$k: ${s.optString(k)}")
+        return l.joinToString("; ")
+    }
+
+    private fun lessons(sp: SharedPreferences, key: String): MutableList<String> =
+        (sp.getString("lessons:$key", "") ?: "").split("\n").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+
+    private fun addLesson(sp: SharedPreferences, key: String, list: MutableList<String>, text: String) {
+        val t = text.replace("\n", " ").take(220)
+        if (list.any { it.equals(t, true) || it.contains(t, true) || t.contains(it, true) }) return
+        list.add(t)
+        while (list.size > 14) list.removeAt(0)
+        sp.edit().putString("lessons:$key", list.joinToString("\n")).apply()
+    }
+
+    private fun statsParts(sp: SharedPreferences, key: String): List<String> =
+        (sp.getString("stats:$key", "0|0|0") ?: "0|0|0").split("|")
+
+    private fun statsText(sp: SharedPreferences, key: String): String {
+        val p = statsParts(sp, key)
+        return "played ${p.getOrElse(0) { "0" }} times, ${p.getOrElse(1) { "0" }} min in total"
+    }
+
+    private fun bumpStats(sp: SharedPreferences, key: String, minutes: Long, turns: Int) {
+        val p = statsParts(sp, key)
+        val s = (p.getOrNull(0)?.toIntOrNull() ?: 0) + 1
+        val m = (p.getOrNull(1)?.toLongOrNull() ?: 0L) + minutes
+        val t = (p.getOrNull(2)?.toIntOrNull() ?: 0) + turns
+        sp.edit().putString("stats:$key", "$s|$m|$t").apply()
+    }
+
+    /** "What do you remember about X?" */
+    fun memoryReport(ctx: Context, arg: String): String {
+        val key = (resolveApp(ctx, arg) ?: arg.trim()).lowercase()
+        val sp = mem(ctx)
+        val screens = loadScreens(sp, key, sizeSig(ctx))
+        val ls = lessons(sp, key)
+        if (screens.length() == 0 && ls.isEmpty() && sp.getString("note:$key", "").isNullOrBlank()) {
+            return "I remember nothing about \"$arg\" yet. Ask me to play it and I will learn it."
+        }
+        return "About ${arg.ifBlank { key }}: ${statsText(sp, key)}.\nControls I know: ${screensText(screens).ifBlank { "none" }}\nLessons:\n" +
+            ls.joinToString("\n") { "- $it" }.ifBlank { "none yet" }
+    }
+
+    /** Rough time a list of steps will take, so the next decision can be prepared while they run. */
+    private fun execEstimate(acts: JSONArray): Long {
+        var t = 0L
+        for (i in 0 until acts.length()) {
+            val a = acts.optJSONObject(i) ?: continue
+            t += 120 + when (a.optString("do").ifBlank { a.optString("type") }) {
+                "wait", "sleep" -> a.optLong("ms", 1000)
+                "hold", "long_press" -> a.optLong("ms", 800)
+                "swipe", "drag" -> a.optLong("ms", 300)
+                "open_app" -> 2500L
+                "multi" -> {
+                    var m = 0L
+                    val ts = a.optJSONArray("touches")
+                    if (ts != null) for (j in 0 until ts.length()) {
+                        val x = ts.optJSONObject(j) ?: continue
+                        m = maxOf(m, x.optLong("at", 0) + x.optLong("ms", 100))
+                    }
+                    m
+                }
+                else -> 100L
+            }
+        }
+        return t
+    }
+
+    private suspend fun execActions(ctx: Context, svc: JarvisAccessibilityService, acts: JSONArray) {
+        for (i in 0 until minOf(acts.length(), 12)) {
+            currentCoroutineContext().ensureActive()
+            val st = acts.optJSONObject(i) ?: continue
+            try { Steps.exec(ctx, svc, st, jitter = true) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* skip this step */ }
+            delay(120)
+        }
+    }
 
     /** Forgets what Jarvis learned about a game and the user's standing yes/no answers (blank = everything). */
     fun forget(ctx: Context, arg: String): String {
@@ -380,15 +489,25 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val started = System.currentTimeMillis()
         val memKey = (pkg ?: name).lowercase()
         val sp = mem(ctx)
+        val size = sizeSig(ctx)
         var note = sp.getString("note:$memKey", "") ?: ""
         val learned = note
+        val screens = loadScreens(sp, memKey, size)
+        val lessonList = lessons(sp, memKey)
         val decisions = HashMap<String, String>()
         for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
+        val scope = CoroutineScope(currentCoroutineContext())
+        var execJob: Job? = null
+        var execEnd = 0L
+        var nextAt = 0L
         var lastDecision = ""
         var reflexResult = ""
-        var reconDone = false
+        var reconDone = screens.length() > 0
         var knowledge = ""
         var lastPlan = ""
+        var lastAhead = ""
+        var strategy = ""
+        var lastState = ""
         var lastNarr = 0L
         var lastTele = 0L
         var parseFail = 0
@@ -404,6 +523,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val history = ArrayDeque<String>()
         var ended = "Finished playing $name."
         try {
+            if (reconDone) report(ctx, "I remember $name (${statsText(sp, memKey)}). I already know its controls, so I am jumping straight in.")
             if (pkg != null) { launchPkg(ctx, pkg); delay(4500) }
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
@@ -428,14 +548,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 }
                 ownFront = 0
 
-                // free-tier friendly: never faster than one call every ~4.5 s
-                val gap = 4200 - (System.currentTimeMillis() - lastCall)
+                // free-tier friendly: one decision every ~6 s at most; the previous plan keeps running meanwhile
+                val readyAt = maxOf(lastCall + 6000, nextAt)
+                val gap = readyAt - System.currentTimeMillis()
                 if (gap > 0) delay(gap)
                 lastCall = System.currentTimeMillis()
 
-                val bmp = if (Build.VERSION.SDK_INT >= 30) svc.screenshot() else null
+                val bmp = if (Build.VERSION.SDK_INT >= 30) Shots.take(svc) else null
                 val text = svc.dump()?.text.orEmpty().take(1200)
-                if (payRx.containsMatchIn(text)) { svc.back(); delay(1500); continue }   // never linger on a payment screen
+                if (payRx.containsMatchIn(text)) { execJob?.cancel(); svc.back(); delay(1500); continue }   // never linger on a payment screen
                 var frame: String? = null
                 if (bmp != null) {
                     val sg = sig(bmp)
@@ -446,7 +567,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 }
                 if (unchanged >= 14) { ended = "Stopped playing $name: the screen has not changed for a while, so I may be stuck."; break }
 
-                // first turn of a session: work out WHAT game this is, WHERE we are and HOW it is controlled
+                // a brand new game: work out WHAT it is, WHERE we are and HOW it is controlled (skipped when the controls are remembered)
                 if (!reconDone) {
                     reconDone = true
                     val rp = "App in front: $front\nUser's goal: $goal\nEarlier notes about this game: ${learned.ifBlank { "none" }}\n" +
@@ -461,7 +582,12 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     if (info != null) {
                         val g = info.optString("game")
                         knowledge = "Game: $g. Genre: ${info.optString("genre")}. Controls: ${info.optString("controls")}. Plan: ${info.optString("goal")}. Tips: ${info.optString("tips")}".take(1100)
-                        report(ctx, "I see: $g (${info.optString("genre")}), screen: ${info.optString("screen_state")}.\nControls: ${info.optString("controls")}\nPlan: ${info.optString("goal")}".take(900))
+                        val st = info.optString("screen_state").ifBlank { "gameplay" }
+                        if (info.optString("controls").isNotBlank()) {
+                            screens.put(st, info.optString("controls").take(500))
+                            saveScreens(sp, memKey, size, screens)
+                        }
+                        report(ctx, "I see: $g (${info.optString("genre")}), screen: $st.\nControls: ${info.optString("controls")}\nPlan: ${info.optString("goal")}".take(900))
                     } else {
                         report(ctx, "[$name] I could not read the game screen yet. I will keep trying while I play.")
                     }
@@ -469,18 +595,26 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     continue
                 }
 
+                val running = execJob?.isActive == true
                 val prompt = "GOAL: $goal\nApp in front: $front\nTurn: ${turns + 1}\n" +
-                    "What I know about this game: ${knowledge.ifBlank { "nothing yet: work out the genre and the controls from the screenshot" }}\n" +
-                    (if (learned.isNotBlank()) "Learned in earlier sessions: $learned\n" else "") +
+                    (if (knowledge.isNotBlank()) "What I know about this game: $knowledge\n" else "") +
+                    (if (screens.length() > 0) "Remembered controls for this screen size (trust them unless the screenshot contradicts them; correct them with \"layout\" if they changed): ${screensText(screens)}\n" else "") +
+                    (if (lessonList.isNotEmpty()) "Lessons from earlier plays (strategy memory):\n" + lessonList.joinToString("\n") { "- $it" } + "\n" else "") +
+                    (if (learned.isNotBlank()) "Notes from earlier sessions: $learned\n" else "") +
                     "Standing answers from the user: ${decisions.entries.joinToString { it.key + "=" + it.value }.ifBlank { "none" }}\n" +
+                    (if (strategy.isNotBlank()) "Current strategy: $strategy\n" else "") +
                     "My notes this session: ${note.ifBlank { "none" }}\n" +
                     "Recent steps: ${history.joinToString(" | ").ifBlank { "none" }}\n" +
-                    (if (lastPlan.isNotBlank()) "My previous plan was: $lastPlan. Did it work? Compare with what the screen shows now; if not, change approach.\n" else "") +
+                    (if (lastPlan.isNotBlank()) "My previous plan was: $lastPlan. Did it work? Compare with the screen now; if not, change approach.\n" else "") +
+                    (if (lastAhead.isNotBlank()) "What I predicted would come next: $lastAhead. Check it against the screen now.\n" else "") +
+                    (if (running) "My previous plan is still executing, about ${((execEnd - System.currentTimeMillis()).coerceAtLeast(0) / 100) / 10.0} s left: plan for the situation when it ends; set interrupt true only if it must be cancelled right now.\n" else "") +
+                    (if (lastState == "game_over") "The game just ended or I lost: write the lesson, then restart with a better approach.\n" else "") +
+                    (if (turns > 0 && turns % 8 == 0) "REFLECT: am I really progressing? If the recent steps repeat without progress, change the strategy now and write a lesson.\n" else "") +
                     (if (lastDecision.isNotBlank()) "USER ANSWER: $lastDecision\n" else "") +
                     (if (reflexResult.isNotBlank()) "LAST REFLEX RESULT: $reflexResult\n" else "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
-                    "Look at the screenshot and decide."
+                    "Look at the screenshot, think ahead, and decide."
                 lastDecision = ""
                 reflexResult = ""
                 val raw = try {
@@ -504,10 +638,25 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 val see = o.optString("see", "").trim()
                 val plan = o.optString("plan", "").trim()
                 lastPlan = plan
+                lastAhead = o.optString("ahead", "").trim().take(300)
+                lastState = o.optString("state", "")
+                o.optString("strategy", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }?.let { strategy = it.take(400) }
+                o.optJSONObject("layout")?.let { l ->
+                    var changed = false
+                    for (k in l.keys()) {
+                        val v = l.optString(k).take(500)
+                        if (v.isNotBlank() && screens.optString(k) != v) { screens.put(k, v); changed = true }
+                    }
+                    if (changed) saveScreens(sp, memKey, size, screens)
+                }
+                val lesson = o.optString("lesson", "").trim()
+                var learnedNow = ""
+                if (lesson.length > 8 && !lesson.equals("null", true)) { addLesson(sp, memKey, lessonList, lesson); learnedNow = lesson }
                 val tn = System.currentTimeMillis()
                 if (see.isNotEmpty() && tn - lastNarr > 20_000) {
                     lastNarr = tn
-                    val line = "[$name | ${o.optString("state", "?")}] $see -> $plan"
+                    val line = "[$name | ${lastState.ifBlank { "?" }}] $see -> " + (if (lastAhead.isNotEmpty()) "expecting: $lastAhead; " else "") + "now: $plan" +
+                        (if (learnedNow.isNotEmpty()) "\nLearned: $learnedNow" else "")
                     ChatBus.publish("jarvis", line)
                     if (tn - lastTele > 90_000) {
                         lastTele = tn
@@ -519,6 +668,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 val ask = o.optJSONObject("ask")
                 val q = ask?.optString("q", "")?.trim().orEmpty()
                 if (ask != null && q.isNotEmpty()) {
+                    execJob?.cancel()
                     val key = ask.optString("key", "").trim().lowercase().replace(Regex("[^a-z0-9_]"), "")
                     val def = !ask.optString("default", "yes").lowercase().startsWith("n")
                     val known = if (key.isNotEmpty()) decisions[key] else null
@@ -540,19 +690,23 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     continue
                 }
 
+                // execute: the plan runs in the background while the next decision is already being prepared (reflexes run right here)
                 val acts: JSONArray = o.optJSONArray("actions") ?: JSONArray()
-                var summary = ""
-                for (i in 0 until minOf(acts.length(), 12)) {
-                    currentCoroutineContext().ensureActive()
-                    val st = acts.optJSONObject(i) ?: continue
-                    Steps.exec(ctx, svc, st, jitter = true)
-                    summary += (if (summary.isEmpty()) "" else ",") + st.optString("do").ifBlank { st.optString("type") }
-                    delay(120)
-                }
                 val rf = o.optJSONObject("reflex")
+                if (o.optBoolean("interrupt", false)) execJob?.cancel()
+                execJob?.join()
+                var summary = (0 until acts.length()).mapNotNull { acts.optJSONObject(it)?.let { s -> s.optString("do").ifBlank { s.optString("type") } } }.joinToString(",")
                 if (rf != null && Build.VERSION.SDK_INT >= 30) {
+                    execActions(ctx, svc, acts)
                     reflexResult = try { Reflex.run(ctx, svc, rf) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Reflex failed: ${e.message}" }
                     summary += (if (summary.isEmpty()) "" else ",") + "reflex(" + rf.optString("kind", "steer") + ")"
+                    nextAt = 0L
+                } else {
+                    if (acts.length() > 0) {
+                        execEnd = System.currentTimeMillis() + execEstimate(acts)
+                        execJob = scope.launch { try { execActions(ctx, svc, acts) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* ignore */ } }
+                    }
+                    nextAt = System.currentTimeMillis() + o.optLong("next_ms", 2000).coerceIn(800, 8000)
                 }
                 turns++
                 history.addLast("t$turns:$summary")
@@ -560,11 +714,10 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 if (turns % 5 == 0 && note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply()
 
                 val say = o.optString("say", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
-                if (o.optBoolean("done", false)) { ended = say ?: "Done: the goal in $name is complete."; break }
+                if (o.optBoolean("done", false)) { execJob?.join(); ended = say ?: "Done: the goal in $name is complete."; break }
                 val t = System.currentTimeMillis()
                 if (say != null && t - lastSay > 120_000) { lastSay = t; report(ctx, "[$name] $say") }
                 else if (t - lastReport > 10 * 60_000L) { lastReport = t; report(ctx, "Still playing $name: ${(t - started) / 60_000} min, $turns turns. ${note.take(120)}") }
-                if (rf == null) delay(o.optLong("next_ms", 2000).coerceIn(800, 8000))
             }
         } catch (e: CancellationException) {
             ended = "Stopped playing $name."
@@ -572,7 +725,9 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         } catch (e: Exception) {
             ended = "Stopped playing $name: ${e.message?.take(100)}"
         } finally {
+            try { execJob?.cancel() } catch (e: Exception) { /* ignore */ }
             try { if (note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply() } catch (e: Exception) { /* ignore */ }
+            try { bumpStats(sp, memKey, (System.currentTimeMillis() - started) / 60_000, turns) } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }
             notifyOff(ctx)
             job = null
