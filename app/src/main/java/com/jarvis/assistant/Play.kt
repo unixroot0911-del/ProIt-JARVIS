@@ -96,7 +96,7 @@ object Steps {
 
     suspend fun exec(ctx: Context, svc: JarvisAccessibilityService, o: JSONObject, jitter: Boolean): Boolean {
         val kindStr = (o.optString("do").ifBlank { o.optString("type") }).lowercase()
-        if (kindStr in pumpOnly || (Touch.running && kindStr in pumpable)) {
+        if (kindStr in pumpOnly || (Touch.heldNames().isNotEmpty() && kindStr in pumpable)) {
             if (!Touch.running) Touch.start(ctx)
             return Touch.exec(ctx, kindStr, o, jitter)
         }
@@ -336,11 +336,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         return t
     }
 
+    @Volatile private var stepTrace = 0
+
     private suspend fun execActions(ctx: Context, svc: JarvisAccessibilityService, acts: JSONArray) {
         for (i in 0 until minOf(acts.length(), 12)) {
             currentCoroutineContext().ensureActive()
             val st = acts.optJSONObject(i) ?: continue
-            try { Steps.exec(ctx, svc, st, jitter = true) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* skip this step */ }
+            var res = "ok"
+            try { if (!Steps.exec(ctx, svc, st, jitter = true)) res = "REFUSED by Android" } catch (e: CancellationException) { throw e } catch (e: Exception) { res = "ERROR " + (e.message ?: e.toString()).take(80); Diag.record(e) }
+            if (stepTrace < 6 || res != "ok" && stepTrace < 12) { stepTrace++; report(ctx, "[step] " + st.toString().take(110) + " -> " + res) }
             delay(120)
         }
     }
@@ -515,6 +519,9 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
         val scope = CoroutineScope(currentCoroutineContext())
         Touch.start(ctx)
+        stepTrace = 0
+        var hubOn = false
+        try { JarvisAccessibilityService.instance?.let { Hub.acquire(it); hubOn = true } } catch (e: Exception) { Diag.record(e) }
         var execJob: Job? = null
         var execEnd = 0L
         var nextAt = 0L
@@ -794,6 +801,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         } finally {
             try { execJob?.cancel() } catch (e: Exception) { /* ignore */ }
             try { Reflex.stopAll(); Touch.stop() } catch (e: Exception) { /* ignore */ }
+            try { if (hubOn) Hub.release() } catch (e: Exception) { /* ignore */ }
             try { if (note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply() } catch (e: Exception) { /* ignore */ }
             try { bumpStats(sp, memKey, (System.currentTimeMillis() - started) / 60_000, turns) } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }

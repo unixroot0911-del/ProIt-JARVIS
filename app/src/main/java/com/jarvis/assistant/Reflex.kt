@@ -23,7 +23,7 @@ object Shots {
     @Volatile private var last = 0L
 
     suspend fun take(svc: JarvisAccessibilityService): Bitmap? = lock.withLock {
-        val wait = 360 - (System.currentTimeMillis() - last)
+        val wait = 340 - (System.currentTimeMillis() - last)
         if (wait > 0) delay(wait)
         last = System.currentTimeMillis()
         svc.screenshot()
