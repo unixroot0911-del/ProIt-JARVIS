@@ -90,7 +90,15 @@ object Steps {
         return gesture(svc, *list.toTypedArray())
     }
 
+    private val pumpOnly = setOf("hold_on", "hold_off", "release", "release_all", "press_and_keep", "repeat_tap", "rapid_tap", "spam_tap")
+    private val pumpable = pumpOnly + setOf("tap", "click", "double_tap", "hold", "long_press", "swipe", "drag", "pinch_in", "pinch_out", "multi")
+
     suspend fun exec(ctx: Context, svc: JarvisAccessibilityService, o: JSONObject, jitter: Boolean): Boolean {
+        val kindStr = (o.optString("do").ifBlank { o.optString("type") }).lowercase()
+        if (kindStr in pumpOnly || (Touch.running && kindStr in pumpable)) {
+            if (!Touch.running) Touch.start(ctx)
+            return Touch.exec(ctx, kindStr, o, jitter)
+        }
         val dm = ctx.resources.displayMetrics
         val w = dm.widthPixels.toFloat()
         val h = dm.heightPixels.toFloat()
@@ -204,7 +212,7 @@ Respond ONLY with compact JSON:
 {"state":"menu|cutscene|dialog|gameplay|ad|loading|game_over|other","see":"one sentence: what is on screen and where your character or vehicle is",
  "ahead":"what you expect in the next 3 to 10 seconds and how you prepare (for example: gentle right bend in about 1.5 s, so one short light steer, then straight)",
  "plan":"one sentence: what you do now","strategy":"your overall approach and next milestones; CHANGE it when it stops working, never repeat a failing routine",
- "actions":[ up to 10 steps ],"reflex":null,"ask":null,"interrupt":false,"layout":null,"lesson":"",
+ "actions":[ up to 10 steps ],"hold":null,"release":null,"reflex":null,"ask":null,"interrupt":false,"layout":null,"lesson":"",
  "note":"memory, max 400 characters: rules and progress","next_ms":1500,"say":"","done":false}
 A "multi" step with timed touches ("at" delays) schedules a whole predicted sequence in advance: for example hold the gas for 6 s, a light steer at 1.5 s and a counter-steer at 3 s. Gentle bends need short light presses (80 to 150 ms), sharp ones longer presses (300 ms and more). A steer reflex with "roi_far" anticipates bends on its own.
 "interrupt": true only when the plan still running must be cancelled right now (danger). "layout": whenever you see a screen state whose button positions are missing from the remembered controls, or they changed: {"gameplay":"gas (0.88,0.8), brake (0.75,0.85), left (0.1,0.85), right (0.25,0.85)"}; they are kept so you recognise them instantly next time. "lesson": after a loss, a mistake or a discovery, one reusable sentence (what happened, what to do differently); it is kept for every future play of this game.
@@ -212,16 +220,19 @@ Coordinates are fractions 0..1 (x from the left, y from the top). Aim at the CEN
 STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800} {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300} (long ms = drag or joystick push)
  {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..} {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
  {"do":"multi","touches":[{"x":0.9,"y":0.8,"at":0,"ms":3000},{"x":0.1,"y":0.8,"at":500,"ms":300}]} = several fingers at once ("at" = start delay ms, "ms" = duration, optional x2,y2 slides that finger). Use it to hold gas or fire while steering.
-REFLEX = a fast loop on the phone (about 3 times a second, no waiting for you) for continuous control. You choose what to follow, it runs up to 20 s, then you look again.
- {"kind":"steer","sample":{"x":0.5,"y":0.78},"roi":{"x1":0.2,"y1":0.45,"x2":0.8,"y2":0.78},"ref_x":0.5,"avoid":false,"control":"buttons","left":{"x":0.12,"y":0.85},"right":{"x":0.88,"y":0.85},"hold":{"x":0.9,"y":0.6},"duration_ms":8000}
-   sample = a point exactly on the colour to follow (road surface just ahead) or, with avoid:true, to steer away from (obstacles, enemies). roi = the area ahead of the player. ref_x = where the player is horizontally.
-   control "buttons" holds your left or right button (hold = optional constant touch such as the gas pedal); "drag" slides a finger along height ctrl_y; "swipe" changes lane with swipes (lane_step = lane width).
-   add "roi_far":{"x1":0.3,"y1":0.3,"x2":0.7,"y2":0.45} (the road further ahead) so the car turns early and gently into a bend it can already see.
- {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85},"duration_ms":8000} taps the lowest object of that colour again and again (piano tiles, falling items, rhythm lanes).
+ {"do":"hold_on","name":"gas","x":0.9,"y":0.8} keeps a finger PRESSED until {"do":"hold_off","name":"gas"}: it never lifts between your decisions (gas pedal, fire, run). Same thing with the top-level fields "hold":{"gas":{"x":0.9,"y":0.8}} and "release":["gas"] (or "all").
+ {"do":"repeat_tap","x":..,"y":..,"count":20,"interval_ms":70} = rapid taps (clickers, button mashing). {"do":"hold","x":..,"y":..,"ms":3000} = one long press. {"do":"swipe",...,"ms":1500} = a slow drag or joystick push.
+CONTROLLERS run on the phone in the BACKGROUND about 3 times a second while you think, until you replace or stop them ("reflex":"stop"). Use them for anything continuous: driving, flying, running, dodging, following, aiming, rapid collecting. Never try to steer with a few one-off presses: put the gas finger down with hold, start a controller, then supervise using the CONTROLLERS status in your next look. "reflex" is one object or a list of up to 3.
+ steer: {"kind":"steer","sample":{"x":0.5,"y":0.72},"roi":{"x1":0.15,"y1":0.5,"x2":0.85,"y2":0.78},"roi_far":{"x1":0.3,"y1":0.35,"x2":0.7,"y2":0.5},"ref_x":0.5,"control":"buttons","left":{"x":0.1,"y":0.85},"right":{"x":0.25,"y":0.85},"hazard":{"sample":{"x":0.05,"y":0.7}}}
+   follows (avoid:false) or avoids (avoid:true) a colour sideways. "sample" = a point exactly ON the colour (the road surface just ahead of the car, or an obstacle). "roi" = the area ahead to look at; "roi_far" = the road further ahead, so it turns early and gently into a bend; "ref_x" = where the player is horizontally, or "self":{"sample":{..}} = a point on the player or car so it is tracked by its colour; "hazard" = a colour to stay away from (walls, grass, water, track edges), it pushes back. "control": "buttons" (positions of the left and right buttons: sharp turns keep the button pressed, gentle ones are light pulses), "drag" (a finger slides along height ctrl_y), "swipe" (lane changes, lane_step = lane width).
+ chase: {"kind":"chase","sample":{"x":..,"y":..},"self":{"sample":{"x":..,"y":..}},"avoid":false,"control":"joystick","joy":{"x":0.2,"y":0.8},"radius":0.08} moves toward (or away from) a colour in two dimensions: "joystick" (a finger slides from the joystick centre), "swipe" (swipes that way) or "tap" (taps the target place).
+ tap_color: {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85}} taps the lowest object of that colour again and again (piano tiles, falling items, rhythm lanes, targets).
+ All accept "tol" (colour tolerance 8 to 120, default 45), "dead" (dead zone), "gain", "id", "hold" (a constant finger) and "duration_ms" (default 45000; sending the identical controller again keeps it alive). Pick sample points exactly on the colour in the screenshot. If the status warns the colour is not inside the roi, or says it lost the target, fix the points.
 HOW TO PLAY:
 - Racing or driving: hold the gas (pedal or reflex hold) and steer with a steer reflex following the road colour; avoid traffic with a second reflex (avoid:true). Runners: swipe lanes (control swipe, avoid:true). Platformers and action: multi with direction held plus jump taps. Shooters: joystick swipe plus a held fire button.
 - Puzzle, card, board, match-3, turn-based: study the board, find the best move, tap precisely, wait for animations. Idle and clickers: bursts of taps, buy upgrades, collect rewards. Story and RPG: tap through dialogue, follow the quest marker.
 - state menu: press Play, Continue or Start. state loading: wait. state ad: find and tap the close X, Skip or Back. state game_over: restart and use the lesson. A popup asking for a rating or permission: dismiss or deny.
+- DRIVING, step by step: 1) find the gas control (none if the car accelerates by itself) and put a finger on it with hold; 2) start a steer controller on the road colour with a hazard colour for walls, grass and edges, and "roi_far" for bends; 3) use brake or nitro as plain steps; 4) each turn read the CONTROLLERS status and the road ahead, refine the points, and never let go of the gas between decisions. The same pattern works for flying, running, boats and any game with continuous movement.
 - Survival, building and open-world games: set milestones (gather wood and stone, craft tools, build shelter, find food and water, watch health and night), keep an eye on the status bars, retreat or heal before danger, and change the plan as the situation changes. Shooters and fighters: learn enemy patterns and adapt.
 - Do not run a fixed loop. If the same routine repeats without progress, change the strategy.
 - NEVER spend real money (Buy, Subscribe, Pay, Install, Update, anything with a price). Never type passwords or card data. A payment screen: press back. Wrong app in front: open_app. If the screen did not change after your last move, do something different.
@@ -497,6 +508,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val decisions = HashMap<String, String>()
         for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
         val scope = CoroutineScope(currentCoroutineContext())
+        Touch.start(ctx)
         var execJob: Job? = null
         var execEnd = 0L
         var nextAt = 0L
@@ -554,7 +566,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 if (gap > 0) delay(gap)
                 lastCall = System.currentTimeMillis()
 
-                val bmp = if (Build.VERSION.SDK_INT >= 30) Shots.take(svc) else null
+                val bmp = if (Build.VERSION.SDK_INT >= 30) (Hub.fresh(1000) ?: Shots.take(svc)) else null
                 val text = svc.dump()?.text.orEmpty().take(1200)
                 if (payRx.containsMatchIn(text)) { execJob?.cancel(); svc.back(); delay(1500); continue }   // never linger on a payment screen
                 var frame: String? = null
@@ -563,7 +575,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     val changed = prev?.let { diff(it, sg) >= 3 } ?: true
                     unchanged = if (changed) 0 else unchanged + 1
                     prev = sg
-                    frame = Player.frame(bmp, 720)
+                    frame = Player.frame(bmp, 840)
                 }
                 if (unchanged >= 14) { ended = "Stopped playing $name: the screen has not changed for a while, so I may be stuck."; break }
 
@@ -611,7 +623,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     (if (lastState == "game_over") "The game just ended or I lost: write the lesson, then restart with a better approach.\n" else "") +
                     (if (turns > 0 && turns % 8 == 0) "REFLECT: am I really progressing? If the recent steps repeat without progress, change the strategy now and write a lesson.\n" else "") +
                     (if (lastDecision.isNotBlank()) "USER ANSWER: $lastDecision\n" else "") +
-                    (if (reflexResult.isNotBlank()) "LAST REFLEX RESULT: $reflexResult\n" else "") +
+                    (Reflex.statusText().let { if (it.isNotBlank()) "CONTROLLERS AND HELD FINGERS: $it\n" else "" }) +
+                    (sp.getString("ctl:$memKey", null)?.let { "Controller recipe I used last time in this game (reuse it if it fits; adapt the points to this screenshot): $it\n" } ?: "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
                     "Look at the screenshot, think ahead, and decide."
@@ -692,22 +705,32 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
 
                 // execute: the plan runs in the background while the next decision is already being prepared (reflexes run right here)
                 val acts: JSONArray = o.optJSONArray("actions") ?: JSONArray()
-                val rf = o.optJSONObject("reflex")
+                val rf = o.opt("reflex")
                 if (o.optBoolean("interrupt", false)) execJob?.cancel()
                 execJob?.join()
                 var summary = (0 until acts.length()).mapNotNull { acts.optJSONObject(it)?.let { s -> s.optString("do").ifBlank { s.optString("type") } } }.joinToString(",")
-                if (rf != null && Build.VERSION.SDK_INT >= 30) {
-                    execActions(ctx, svc, acts)
-                    reflexResult = try { Reflex.run(ctx, svc, rf) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Reflex failed: ${e.message}" }
-                    summary += (if (summary.isEmpty()) "" else ",") + "reflex(" + rf.optString("kind", "steer") + ")"
-                    nextAt = 0L
-                } else {
-                    if (acts.length() > 0) {
-                        execEnd = System.currentTimeMillis() + execEstimate(acts)
-                        execJob = scope.launch { try { execActions(ctx, svc, acts) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* ignore */ } }
+                // fingers that stay down between decisions
+                o.optJSONObject("hold")?.let { hh ->
+                    for (k in hh.keys()) {
+                        val p = hh.optJSONObject(k) ?: continue
+                        Touch.hold(k, p.optDouble("x", 0.5).toFloat(), p.optDouble("y", 0.5).toFloat())
+                        summary += (if (summary.isEmpty()) "" else ",") + "hold($k)"
                     }
-                    nextAt = System.currentTimeMillis() + o.optLong("next_ms", 2000).coerceIn(800, 8000)
                 }
+                val rel = o.opt("release")
+                if (rel is JSONArray) { for (i in 0 until rel.length()) Touch.release(rel.optString(i)) }
+                else if (rel is String && rel.isNotBlank() && !rel.equals("null", true)) { if (rel.equals("all", true)) Touch.releaseAll() else Touch.release(rel) }
+                // controllers keep driving in the background while the next decision is prepared
+                if (rf != null && rf != JSONObject.NULL && Build.VERSION.SDK_INT >= 30) {
+                    val n0 = Reflex.apply(ctx, rf)
+                    summary += (if (summary.isEmpty()) "" else ",") + "controller($n0)"
+                    if (rf is JSONObject || rf is JSONArray) sp.edit().putString("ctl:$memKey", rf.toString().take(2500)).apply()
+                }
+                if (acts.length() > 0) {
+                    execEnd = System.currentTimeMillis() + execEstimate(acts)
+                    execJob = scope.launch { try { execActions(ctx, svc, acts) } catch (e: CancellationException) { throw e } catch (e: Exception) { /* ignore */ } }
+                }
+                nextAt = System.currentTimeMillis() + o.optLong("next_ms", 2000).coerceIn(800, 8000)
                 turns++
                 history.addLast("t$turns:$summary")
                 while (history.size > 5) history.removeFirst()
@@ -726,6 +749,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
             ended = "Stopped playing $name: ${e.message?.take(100)}"
         } finally {
             try { execJob?.cancel() } catch (e: Exception) { /* ignore */ }
+            try { Reflex.stopAll(); Touch.stop() } catch (e: Exception) { /* ignore */ }
             try { if (note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply() } catch (e: Exception) { /* ignore */ }
             try { bumpStats(sp, memKey, (System.currentTimeMillis() - started) / 60_000, turns) } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }
@@ -791,6 +815,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         } catch (e: Exception) {
             ended = "Macro $name stopped: ${e.message?.take(100)}"
         } finally {
+            try { Touch.stop() } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }
             notifyOff(ctx)
             job = null
