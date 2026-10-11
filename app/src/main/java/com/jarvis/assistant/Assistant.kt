@@ -269,6 +269,7 @@ class Assistant(context: Context) {
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
                 t == "stop_agent" || t == "stop_play" || t == "stop_macro" -> Player.stopAll(arg.trim().lowercase() == "all")
                 t == "play" || t == "play_game" || t == "automate" -> Player.startAI(appContext, brain, arg)
+                t == "play_forget" -> Player.forget(appContext, arg)
                 t == "macro_create" -> Macros.create(appContext, brain, arg)
                 t == "macro_run" -> Player.startMacro(appContext, arg)
                 t == "macro_list" -> Macros.list(appContext)

@@ -93,6 +93,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "stop_agent" (arg = "" or "all": stops the screen agent, any game being played and any macro; "all" also stops live watching),
               "play" (arg = "app or game name|what to do (optional)|how long (optional, e.g. 30 minutes, 2 hours, 100 times, forever)":
                   Jarvis really plays the game or uses the app by itself with real touches, looking at the screen and deciding every move; the user can ask again as many times as they want),
+              "play_forget" (arg = game or app name, or blank for all: forgets what Jarvis learned about that game and the user's standing yes/no answers, so it asks again),
               "macro_create" (arg = "macro name|exactly what the touch routine does": saves a repeatable touch routine, e.g. tapping a button, swiping in a pattern, daily chores in an app),
               "macro_run" (arg = "macro name|how long or how many times, or forever": replays a saved macro with no AI and no limit),
               "macro_list" (arg = ""),
@@ -135,6 +136,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         "simulate using the phone" all mean: play (or macro_create then macro_run for a purely repetitive routine such as tapping one spot). It works for any app or game,
         as often as the user asks, and "forever" keeps going until they say stop. Games that need slow decisions (idle, clickers, puzzles, cards, turn-based, quests, daily rewards)
         work best; very fast reflex games (racing, shooters) are limited by the AI's reaction time, so say so in one short line while still doing it.
+        While playing, Jarvis thinks like an expert: it works out the genre and controls, drives and dodges with fast on-phone reflexes (steering along a road, avoiding obstacles,
+        tapping targets, holding the gas while steering with several fingers), and asks the user YES or NO on the screen only when it truly matters (a cutscene, a story choice,
+        something irreversible), deciding everything else itself. It remembers what it learned about each game for next time.
         Never spend money in a game. If the game is online multiplayer, add one short warning that automation can get an account banned, then do it anyway.
         A repeated task at a time ("every night at 22:00 play X for 30 minutes") is schedule_task. Never say you cannot play: start it.
         "Watch me while I do X" means watch_start with X as the arg: confirm in one short line, do not refuse.

@@ -12,6 +12,15 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
+import android.app.AlertDialog
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.view.ContextThemeWrapper
+import android.view.WindowManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
@@ -54,11 +63,29 @@ object Steps {
             }
         }
 
-    private fun stroke(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long, w: Float, h: Float): GestureDescription.StrokeDescription {
+    private fun stroke(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long, w: Float, h: Float, at: Long = 0L): GestureDescription.StrokeDescription {
         val p = Path()
         p.moveTo(x1.coerceIn(1f, w - 1), y1.coerceIn(1f, h - 1))
         if (x1 != x2 || y1 != y2) p.lineTo(x2.coerceIn(1f, w - 1), y2.coerceIn(1f, h - 1))
-        return GestureDescription.StrokeDescription(p, 0, ms.coerceIn(10, 20_000))
+        return GestureDescription.StrokeDescription(p, at.coerceIn(0, 40_000), ms.coerceIn(10, 20_000))
+    }
+
+    /** Several fingers at once, each with its own start delay: hold the gas while steering, two thumbs, joystick plus a button. */
+    suspend fun multi(ctx: Context, svc: JarvisAccessibilityService, touches: JSONArray, jitter: Boolean): Boolean {
+        val dm = ctx.resources.displayMetrics
+        val w = dm.widthPixels.toFloat()
+        val h = dm.heightPixels.toFloat()
+        val list = ArrayList<GestureDescription.StrokeDescription>()
+        for (i in 0 until minOf(touches.length(), 10)) {
+            val t = touches.optJSONObject(i) ?: continue
+            val x = t.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f) * w
+            val y = t.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f) * h
+            val x2 = if (t.has("x2")) t.optDouble("x2", 0.5).toFloat().coerceIn(0f, 1f) * w else x
+            val y2 = if (t.has("y2")) t.optDouble("y2", 0.5).toFloat().coerceIn(0f, 1f) * h else y
+            list.add(stroke(x, y, x2, y2, t.optLong("ms", 100), w, h, t.optLong("at", 0)))
+        }
+        if (list.isEmpty()) return false
+        return gesture(svc, *list.toTypedArray())
     }
 
     suspend fun exec(ctx: Context, svc: JarvisAccessibilityService, o: JSONObject, jitter: Boolean): Boolean {
@@ -96,6 +123,7 @@ object Steps {
                     stroke(cx - a, cy, cx - b, cy, 450, w, h),
                     stroke(cx + a, cy, cx + b, cy, 450, w, h))
             }
+            "multi" -> multi(ctx, svc, o.optJSONArray("touches") ?: JSONArray(), jitter)
             "wait", "sleep" -> { delay(ms("ms", 1000).coerceIn(50, 30_000)); true }
             "back" -> svc.back()
             "home" -> svc.home()
@@ -159,23 +187,84 @@ object Player {
         RegexOption.IGNORE_CASE
     )
 
-    private const val SYSTEM = """You are JARVIS, playing a game or operating an app on the user's Android phone like a skilled human player, using touch gestures.
-Each turn you receive a screenshot of the phone, sometimes the screen text, the GOAL, and your own notes from earlier turns.
-Respond ONLY with JSON:
-{"actions":[ up to 10 steps ], "next_ms": 1500, "note": "short memory for yourself: what you are doing, what you learned, level or progress", "say": "", "done": false}
-Each step is one of (x and y are fractions 0..1 of the screen width and height, from the top-left corner; aim at the CENTER of the target in the screenshot):
- {"do":"tap","x":0.5,"y":0.5}  {"do":"double_tap","x":..,"y":..}  {"do":"hold","x":..,"y":..,"ms":800}
- {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300}  {"do":"pinch_in","x":..,"y":..}  {"do":"pinch_out","x":..,"y":..}
- {"do":"wait","ms":800}  {"do":"back"}  {"do":"open_app","app":"name"}  {"do":"type","text":"..."}
-Rules:
-- Play to achieve the GOAL. Chain several steps in one turn when you know the sequence (many quick taps for a clicker, a swipe path, a series of moves). Add short waits between steps when the game needs time.
-- Games with slow decisions (idle, clicker, puzzle, card, board, turn-based, match-3, quests, daily routines) are your strength. If the game is too fast to react to, do the best you can with long, planned swipe or tap sequences.
-- Close ads and popups (look for X, Close, Skip, No thanks, Later). Claim FREE rewards and daily bonuses. Dismiss rating prompts.
-- NEVER spend real money: never tap Buy, Subscribe, Pay, Purchase, Install, Update, or anything with a price. Never enter passwords, card numbers or personal data. If a payment screen appears, press back.
-- If the wrong app is in front (home screen, launcher, other app), use open_app with the right name.
-- Never repeat a step that visibly did nothing: try a different spot, a swipe, back, or another approach.
-- "done": true ONLY when the goal is fully achieved or truly impossible; then "say" explains in one sentence. While playing, "say" stays "" except for a real milestone (level up, new record, a problem): one short sentence in the user's language (Arabic or Darija if they use it).
-- "next_ms": how long to wait before the next turn (1000 to 8000)."""
+    private const val SYSTEM = """You are JARVIS, an expert gamer and phone operator, playing a game or using an app on the user's Android phone with real touch gestures.
+Each turn you get a screenshot (with a thin yellow grid whose lines are labelled 0.1 to 0.9 across the top and down the left side: use it to read exact coordinates), sometimes the screen text, the GOAL, and your memory.
+THINK before acting. Respond ONLY with JSON:
+{"see":"what is on screen: game genre, your character or vehicle and where it is, obstacles, menus, buttons, any text",
+ "plan":"what you will do now and why, in one or two sentences",
+ "actions":[ up to 10 steps ],
+ "reflex": null or {...},
+ "ask": null or {"q":"question for the user","default":"yes","key":"short_snake_case_id"},
+ "note":"memory for yourself, max 500 characters: game genre, how the controls work with coordinates, rules you learned, what worked, current progress",
+ "next_ms":1500, "say":"", "done":false}
+Coordinates x and y are fractions 0..1 of screen width and height from the top-left corner. Aim at the CENTER of the target.
+STEPS: {"do":"tap","x":..,"y":..} {"do":"double_tap","x":..,"y":..} {"do":"hold","x":..,"y":..,"ms":800}
+ {"do":"swipe","x1":..,"y1":..,"x2":..,"y2":..,"ms":300}  (a long ms makes it a drag or a joystick push) {"do":"pinch_in","x":..,"y":..} {"do":"pinch_out","x":..,"y":..}
+ {"do":"wait","ms":800} {"do":"back"} {"do":"open_app","app":"name"} {"do":"type","text":".."}
+ {"do":"multi","touches":[{"x":..,"y":..,"at":0,"ms":3000},{"x":..,"y":..,"at":500,"ms":300},{"x1":0,"x":0.3,"y":0.8,"x2":0.5,"y2":0.8,"at":0,"ms":400}]}
+   = several fingers at the same time. "at" is the start delay in ms from now, "ms" the duration, an optional x2,y2 makes that finger slide. Max 10 fingers, 20 seconds.
+   Use it to HOLD the gas or the fire button while pressing left or right, to hold a direction while jumping, to push a joystick while shooting.
+REFLEX = a fast control loop that runs on the phone about 3 times a second, without waiting for you. Use it whenever the game needs continuous control (driving, flying, running, dodging, rhythm, tapping targets). You choose what to follow, it does the rest for up to 20 seconds, then you look again.
+ Steering: {"kind":"steer","sample":{"x":0.5,"y":0.78},"tol":45,"roi":{"x1":0.2,"y1":0.45,"x2":0.8,"y2":0.78},"ref_x":0.5,"avoid":false,"control":"buttons","left":{"x":0.12,"y":0.85},"right":{"x":0.88,"y":0.85},"hold":{"x":0.9,"y":0.6},"duration_ms":8000}
+   "sample" = a point on the screenshot whose colour is the thing to follow (for a road: a spot of road surface just ahead of the car; for obstacles with avoid:true: a spot on an obstacle). "roi" = the area ahead of the player to look at. "ref_x" = where the player or car is horizontally.
+   avoid:false steers toward the centre of that colour (staying on the road, chasing a target). avoid:true steers away from it (obstacles, enemies, walls, hazards).
+   "control":"buttons" holds your left or right button (give their positions; "hold" is an optional constant touch such as the gas pedal or fire button).
+   "control":"drag" slides a finger left and right along height "ctrl_y" (games where you drag the ship, the player or the car; start finger at ref_x).
+   "control":"swipe" makes a lane change swipe (endless runners; "lane_step" = lane width as a fraction, default 0.25) .
+ Tapping: {"kind":"tap_color","sample":{"x":..,"y":..},"roi":{"x1":0,"y1":0.3,"x2":1,"y2":0.85},"tol":40,"duration_ms":8000} taps the lowest object of that colour again and again (piano tiles, falling items, whack-a-mole, rhythm lanes, collectibles).
+ Pick a sample point that is exactly on the colour, check it in the screenshot. A turn with a reflex usually needs no actions.
+HOW TO PLAY WELL:
+- First turn in a new game: find out the genre and the controls (read tutorial text and button icons) and write them in "note". Later turns: use your notes, do not rediscover.
+- RACING or DRIVING: the car usually accelerates by itself or has a gas pedal (hold it through reflex "hold" or multi). Steer with the left and right controls: use a steer reflex whose sample is the road surface and whose roi covers the road ahead; add a second reflex later for obstacles or traffic with avoid:true. Use nitro or brake buttons with plain steps between reflexes.
+- ENDLESS RUNNERS: swipe left or right to change lane, up to jump, down to roll: steer reflex with control swipe and avoid:true on the obstacle colour.
+- PLATFORMERS and ACTION: multi with the direction held and jump taps at the right "at" times. Joystick games: a swipe with a long ms from the joystick centre toward the target while another finger holds the fire button.
+- PUZZLE, CARD, BOARD, MATCH-3, WORD and TURN-BASED: study the board carefully, work out the best move, play it with precise taps, wait for animations, repeat. Think harder here, you have time.
+- IDLE and CLICKER: tap the main target in bursts (ten taps with 60 ms waits), then buy upgrades with in-game currency, collect free rewards and offline gains.
+- STORY and RPG: tap to advance dialogue, follow the quest marker, fight sensibly, use healing before danger.
+- Close ads and popups (X, Close, Skip, No thanks, Later), claim FREE rewards and daily bonuses, dismiss rating prompts and permission pop-ups (deny them).
+- NEVER spend real money: never tap Buy, Subscribe, Pay, Purchase, Install, Update or anything with a real price. Never type passwords, card numbers or personal data. Payment screen: press back.
+- If the wrong app is in front (home screen, launcher), use open_app with the right name. Never repeat a step that visibly did nothing: try something different. If you died, lost or the game over screen shows, restart and try a better approach, and put the lesson in "note".
+WHEN TO ASK THE USER ("ask"; a YES or NO dialog appears on the phone; no answer in a minute means your "default" is used):
+- Ask when the user's preference really matters: a cutscene, long video or lengthy story scene appears for the first time (skip it?), a story choice that changes the outcome, a permanent or irreversible decision, spending a rare in-game resource, deleting progress or logging out, an unclear goal.
+- Do NOT ask about routine things you can decide yourself: tutorials you can skip with a visible Skip, ads, menus, upgrades, restarts, which lane or move is best. Choose smartly and keep playing. Never ask the same question twice: use a short "key" (for example skip_cutscenes) and remember the answer. If "Standing answers" already contains your key, apply it silently.
+- When you ask, "actions" and "reflex" are ignored for that turn; you will receive the answer next turn.
+"done": true ONLY when the goal is fully achieved or truly impossible, then "say" explains in one sentence. While playing "say" stays empty except for a real milestone or a problem: one short sentence in the user's language (Arabic or Darija if they use it).
+"next_ms": wait before your next turn, 1000 to 8000. Games that need tight control: use a reflex and a short next_ms."""
+
+    private fun mem(ctx: Context) = ctx.getSharedPreferences("jarvis_play_mem", Context.MODE_PRIVATE)
+
+    /** Forgets what Jarvis learned about a game and the user's standing yes/no answers (blank = everything). */
+    fun forget(ctx: Context, arg: String): String {
+        val key = (resolveApp(ctx, arg) ?: arg.trim()).lowercase()
+        val sp = mem(ctx)
+        val e = sp.edit()
+        for (k in sp.all.keys) if (k.contains(":$key")) e.remove(k)
+        e.apply()
+        return "Forgot what I learned and your standing answers for ${arg.ifBlank { "every game" }}."
+    }
+
+    /** A downscaled screenshot with a labelled grid so the brain can read exact coordinates. */
+    fun frame(bmp: Bitmap, max: Int): String {
+        val sc = max.toFloat() / maxOf(bmp.width, bmp.height)
+        val b = if (sc < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * sc).toInt().coerceAtLeast(1), (bmp.height * sc).toInt().coerceAtLeast(1), true) else bmp
+        return try {
+            val m = b.copy(Bitmap.Config.ARGB_8888, true)
+            val c = Canvas(m)
+            val line = Paint().apply { color = Color.argb(75, 255, 255, 0); strokeWidth = 1f }
+            val txt = Paint().apply { color = Color.WHITE; textSize = m.width / 30f; isFakeBoldText = true; setShadowLayer(3f, 0f, 0f, Color.BLACK) }
+            for (i in 1..9) {
+                val x = m.width * i / 10f
+                val y = m.height * i / 10f
+                c.drawLine(x, 0f, x, m.height.toFloat(), line)
+                c.drawLine(0f, y, m.width.toFloat(), y, line)
+                c.drawText("0.$i", x - txt.textSize, txt.textSize, txt)
+                c.drawText("0.$i", 2f, y + txt.textSize / 3f, txt)
+            }
+            Watcher.toBase64(m, max)
+        } catch (e: Exception) {
+            Watcher.toBase64(b, max)
+        }
+    }
 
     private fun report(ctx: Context, text: String) {
         ChatBus.publish("jarvis", text)
@@ -303,7 +392,14 @@ Rules:
         val lock = wake(ctx, limit.ms + 120_000)
         notifyOn(ctx, name)
         val started = System.currentTimeMillis()
-        var note = ""
+        val memKey = (pkg ?: name).lowercase()
+        val sp = mem(ctx)
+        var note = sp.getString("note:$memKey", "") ?: ""
+        val learned = note
+        val decisions = HashMap<String, String>()
+        for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
+        var lastDecision = ""
+        var reflexResult = ""
         var errors = 0
         var turns = 0
         var unchanged = 0
@@ -350,20 +446,26 @@ Rules:
                 if (payRx.containsMatchIn(text)) { svc.back(); delay(1500); continue }   // never linger on a payment screen
                 var frame: String? = null
                 if (bmp != null) {
-                    val s = sig(bmp)
-                    val changed = prev?.let { diff(it, s) >= 3 } ?: true
+                    val sg = sig(bmp)
+                    val changed = prev?.let { diff(it, sg) >= 3 } ?: true
                     unchanged = if (changed) 0 else unchanged + 1
-                    prev = s
-                    frame = Watcher.toBase64(bmp, 720)
+                    prev = sg
+                    frame = Player.frame(bmp, 720)
                 }
                 if (unchanged >= 14) { ended = "Stopped playing $name: the screen has not changed for a while, so I may be stuck."; break }
 
                 val prompt = "GOAL: $goal\nApp in front: $front\nTurn: ${turns + 1}\n" +
-                    "My notes so far: ${note.ifBlank { "none yet" }}\n" +
+                    (if (learned.isNotBlank()) "Learned in earlier sessions about this game: $learned\n" else "") +
+                    "Standing answers from the user: ${decisions.entries.joinToString { it.key + "=" + it.value }.ifBlank { "none" }}\n" +
+                    "My notes this session: ${note.ifBlank { "none yet: this is a new game, work out the genre and the controls" }}\n" +
                     "Recent steps: ${history.joinToString(" | ").ifBlank { "none" }}\n" +
+                    (if (lastDecision.isNotBlank()) "USER ANSWER: $lastDecision\n" else "") +
+                    (if (reflexResult.isNotBlank()) "LAST REFLEX RESULT: $reflexResult\n" else "") +
                     (if (unchanged >= 3) "WARNING: the screen did not change after my last $unchanged turns. Try something different.\n" else "") +
                     (if (text.isNotBlank()) "Screen text:\n$text\n" else "") +
-                    "Look at the screenshot and decide the next steps."
+                    "Look at the screenshot (grid labels are fractions of the screen) and decide."
+                lastDecision = ""
+                reflexResult = ""
                 val raw = try {
                     brain.complete(SYSTEM, prompt, emptyList(), frame, json = true)
                 } catch (e: CancellationException) { throw e } catch (e: Exception) {
@@ -374,7 +476,33 @@ Rules:
                 }
                 errors = 0
                 val o = try { JSONObject(Brain.extractJson(raw)) } catch (e: Exception) { turns++; delay(2000); continue }
-                note = o.optString("note", note).take(400)
+                note = o.optString("note", note).take(700)
+
+                // a question for the user: YES or NO on the screen
+                val ask = o.optJSONObject("ask")
+                val q = ask?.optString("q", "")?.trim().orEmpty()
+                if (ask != null && q.isNotEmpty()) {
+                    val key = ask.optString("key", "").trim().lowercase().replace(Regex("[^a-z0-9_]"), "")
+                    val def = !ask.optString("default", "yes").lowercase().startsWith("n")
+                    val known = if (key.isNotEmpty()) decisions[key] else null
+                    if (known != null) {
+                        lastDecision = "standing answer $key=$known: apply it, do not ask again."
+                    } else {
+                        report(ctx, "[$name] $q  (answer YES or NO on the phone screen)")
+                        val ans = Ask.yesNo(ctx, "[$name]\n\n$q\n\n(No answer in 60 s means ${if (def) "YES" else "NO"}.)", 60_000)
+                        val yes = ans ?: def
+                        lastDecision = "the user answered ${if (yes) "YES" else "NO"}${if (ans == null) " (no reply, default)" else ""} to: $q"
+                        if (ans != null && key.isNotEmpty()) {
+                            decisions[key] = if (yes) "yes" else "no"
+                            sp.edit().putString("dec:$memKey:$key", decisions[key]).apply()
+                        }
+                    }
+                    turns++
+                    history.addLast("t$turns:asked")
+                    delay(800)
+                    continue
+                }
+
                 val acts: JSONArray = o.optJSONArray("actions") ?: JSONArray()
                 var summary = ""
                 for (i in 0 until minOf(acts.length(), 12)) {
@@ -384,16 +512,22 @@ Rules:
                     summary += (if (summary.isEmpty()) "" else ",") + st.optString("do").ifBlank { st.optString("type") }
                     delay(120)
                 }
+                val rf = o.optJSONObject("reflex")
+                if (rf != null && Build.VERSION.SDK_INT >= 30) {
+                    reflexResult = try { Reflex.run(ctx, svc, rf) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Reflex failed: ${e.message}" }
+                    summary += (if (summary.isEmpty()) "" else ",") + "reflex(" + rf.optString("kind", "steer") + ")"
+                }
                 turns++
                 history.addLast("t$turns:$summary")
                 while (history.size > 5) history.removeFirst()
+                if (turns % 5 == 0 && note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply()
 
                 val say = o.optString("say", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
                 if (o.optBoolean("done", false)) { ended = say ?: "Done: the goal in $name is complete."; break }
                 val t = System.currentTimeMillis()
                 if (say != null && t - lastSay > 120_000) { lastSay = t; report(ctx, "[$name] $say") }
                 else if (t - lastReport > 10 * 60_000L) { lastReport = t; report(ctx, "Still playing $name: ${(t - started) / 60_000} min, $turns turns. ${note.take(120)}") }
-                delay(o.optLong("next_ms", 2000).coerceIn(800, 8000))
+                if (rf == null) delay(o.optLong("next_ms", 2000).coerceIn(800, 8000))
             }
         } catch (e: CancellationException) {
             ended = "Stopped playing $name."
@@ -401,6 +535,7 @@ Rules:
         } catch (e: Exception) {
             ended = "Stopped playing $name: ${e.message?.take(100)}"
         } finally {
+            try { if (note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply() } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }
             notifyOff(ctx)
             job = null
@@ -526,7 +661,7 @@ The steps form ONE round; Jarvis repeats the round. Include waits where the app 
             if (front == ctx.packageName) {
                 screenNote = "(The macro's app is not on screen, so aim from your knowledge of the app; the user may need to adjust.)"
             } else if (Build.VERSION.SDK_INT >= 30) {
-                svc.screenshot()?.let { frame = Watcher.toBase64(it, 900) }
+                svc.screenshot()?.let { frame = Player.frame(it, 900) }
             }
         }
         val raw = brain.complete(SYSTEM, "Macro name: $name\nWhat it must do: $desc\n$screenNote", emptyList(), frame, json = true)
@@ -541,6 +676,40 @@ The steps form ONE round; Jarvis repeats the round. Include waits where the app 
     }
 
     fun delete(f: File): Boolean = f.delete()
+}
+
+/** YES / NO question on the screen, also over a game. Returns null when nobody answered in time. */
+object Ask {
+    suspend fun yesNo(ctx: Context, message: String, timeoutMs: Long): Boolean? = suspendCancellableCoroutine { cont ->
+        val h = Handler(Looper.getMainLooper())
+        var dlg: AlertDialog? = null
+        h.post {
+            try {
+                val act = Engine.foreground
+                val c: Context = act ?: run {
+                    if (!Settings.canDrawOverlays(ctx)) { if (cont.isActive) cont.resume(null); return@post }
+                    ContextThemeWrapper(ctx.applicationContext, R.style.Theme_Jarvis)
+                }
+                val d = AlertDialog.Builder(c)
+                    .setTitle("Jarvis asks")
+                    .setMessage(message)
+                    .setCancelable(false)
+                    .setNegativeButton("NO") { _, _ -> if (cont.isActive) cont.resume(false) }
+                    .setPositiveButton("YES") { _, _ -> if (cont.isActive) cont.resume(true) }
+                    .create()
+                if (act == null) d.window?.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                dlg = d
+                d.show()
+                h.postDelayed({
+                    if (cont.isActive) cont.resume(null)
+                    try { d.dismiss() } catch (e: Exception) { /* already gone */ }
+                }, timeoutMs)
+            } catch (e: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
+        cont.invokeOnCancellation { h.post { try { dlg?.dismiss() } catch (e: Exception) { /* ignore */ } } }
+    }
 }
 
 class PlayStopReceiver : BroadcastReceiver() {
