@@ -215,6 +215,15 @@ class Assistant(context: Context) {
         RegexOption.IGNORE_CASE
     )
 
+    /** Games and "play X" belong to the player (sees the screen, remembers games, holds fingers), not the text-only agent. */
+    private fun redirectPlay(goal: String): String? {
+        val g = goal.trim()
+        if (g.startsWith("play:")) return Player.startAI(appContext, brain, g.removePrefix("play:"))
+        if (!Player.looksLikePlay(appContext, g)) return null
+        val app = try { actions.mentions(g).firstOrNull() ?: "" } catch (e: Exception) { "" }
+        return Player.startAI(appContext, brain, app + "|" + g + "|")
+    }
+
     private fun startAgent(goal: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
         if (Engine.agentJob?.isActive == true) return "An agent task is already running. Say 'stop agent' first."
         Engine.lastGoal = goal
@@ -299,7 +308,7 @@ class Assistant(context: Context) {
                     prefs.mode = if (arg.trim().lowercase() == "study") "study" else "normal"
                     "Mode: ${prefs.mode}."
                 }
-                t == "run_agent" -> startAgent(arg, confirm, onProgress)
+                t == "run_agent" -> redirectPlay(arg) ?: startAgent(arg, confirm, onProgress)
                 t == "set_voice" -> when (arg.trim().lowercase()) {
                     "force", "force_on" -> { prefs.forceVoice = true; prefs.speakReplies = true; "Forced voice ON: I speak everything aloud, always." }
                     "force_off" -> { prefs.forceVoice = false; "Forced voice off." }

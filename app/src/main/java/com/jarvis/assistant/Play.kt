@@ -352,7 +352,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
             val st = acts.optJSONObject(i) ?: continue
             var res = "ok"
             try { if (!Steps.exec(ctx, svc, st, jitter = true)) res = "REFUSED by Android" } catch (e: CancellationException) { throw e } catch (e: Exception) { res = "ERROR " + (e.message ?: e.toString()).take(80); Diag.record(e) }
-            if (stepTrace < 6 || res != "ok" && stepTrace < 12) { stepTrace++; report(ctx, "[step] " + st.toString().take(110) + " -> " + res) }
+            if (res != "ok" && stepTrace < 6) { stepTrace++; report(ctx, "[step] " + st.toString().take(110) + " -> " + res) }
             delay(120)
         }
     }
@@ -493,8 +493,24 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     }
 
     /** arg = "app or game|what to do (optional)|how long (optional)". Examples: "Monoposto||30 minutes", "Clash of Clans|collect resources and train troops|2 hours". */
+    private val playRx = Regex("(?i)\\b(play|playing|game|games|level|race|racing|drive|driving|grind|farm|battle|spin|quest)\\b|العب|لعب|لعبة|ألعاب|سباق|قيادة|مرحلة|معركة")
+    private val notGame = Regex("(?i)music|song|songs|video|youtube|spotify|podcast|playlist|أغنية|اغنية|موسيقى|فيديو|مقطع")
+
+    /** True when a screen-agent goal is really about playing a game or when a game is in front. */
+    fun looksLikePlay(ctx: Context, goal: String): Boolean {
+        if (notGame.containsMatchIn(goal)) return false
+        if (playRx.containsMatchIn(goal)) return true
+        val pkg = JarvisAccessibilityService.instance?.rootInActiveWindow?.packageName?.toString() ?: return false
+        return try {
+            val ai = ctx.packageManager.getApplicationInfo(pkg, 0)
+            (ai.flags and android.content.pm.ApplicationInfo.FLAG_IS_GAME) != 0 ||
+                (Build.VERSION.SDK_INT >= 26 && ai.category == android.content.pm.ApplicationInfo.CATEGORY_GAME)
+        } catch (e: Exception) { false }
+    }
+
     fun startAI(ctx: Context, brain: Brain, arg: String): String {
         preflight(ctx)?.let { return it }
+        Engine.lastGoal = "play:" + arg
         val prefs = Prefs(ctx)
         if (prefs.geminiKey.isEmpty() && prefs.groqKey.isEmpty()) return "Playing needs a free Gemini key (vision). Add it in Settings."
         val p = arg.split("|", limit = 3).map { it.trim() }
@@ -634,7 +650,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     continue
                 }
                 blind = 0
-                if (traced < 3) report(ctx, "[trace ${traced + 1}] front=${front.ifBlank { "?" }} screen=${bmp?.let { "${it.width}x${it.height}" } ?: "none"} touch=${if (Touch.running) "on" else "OFF"}${Touch.problem.let { if (it.isBlank()) "" else " problem=$it" }}")
+                if (false) report(ctx, "[trace ${traced + 1}] front=${front.ifBlank { "?" }} screen=${bmp?.let { "${it.width}x${it.height}" } ?: "none"} touch=${if (Touch.running) "on" else "OFF"}${Touch.problem.let { if (it.isBlank()) "" else " problem=$it" }}")
                 var frame: String? = null
                 if (bmp != null) {
                     val sg = sig(bmp)
@@ -720,7 +736,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 parseFail = 0
                 lastProgress = System.currentTimeMillis()
                 blocker = ""
-                if (traced < 3) { traced++; report(ctx, "[trace $traced] brain: " + raw.replace("\n", " ").take(260)) }
+                if (traced < 3) traced++
                 if (Touch.problem.isNotBlank()) { ended = "Stopped playing $name: " + Touch.problem; break }
                 note = o.optString("note", note).take(700)
                 val see = o.optString("see", "").trim()
