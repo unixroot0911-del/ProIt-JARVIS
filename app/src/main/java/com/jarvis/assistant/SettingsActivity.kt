@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.speakReplies = speak.isChecked
             prefs.forceVoice = force.isChecked
             prefs.sttGeminiFirst = sttAccurate.isChecked
-            prefs.mode = if (study.isChecked) "study" else "normal"
+            prefs.mode = if (study.isChecked) "study" else if (prefs.mode == "study") "normal" else prefs.mode
             prefs.briefingsOn = briefings.isChecked
             prefs.morningTime = morning.text.toString().ifBlank { "07:30" }
             prefs.eveningTime = evening.text.toString().ifBlank { "21:00" }

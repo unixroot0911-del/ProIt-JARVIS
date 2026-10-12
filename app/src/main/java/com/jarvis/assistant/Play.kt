@@ -499,6 +499,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     /** True when a screen-agent goal is really about playing a game or when a game is in front. */
     fun looksLikePlay(ctx: Context, goal: String): Boolean {
         if (notGame.containsMatchIn(goal)) return false
+        if (Modes.current(ctx) == "gaming" && !Regex("(?i)setting|wifi|bluetooth|إعدادات|اعدادات").containsMatchIn(goal)) return true
         if (playRx.containsMatchIn(goal)) return true
         val pkg = JarvisAccessibilityService.instance?.rootInActiveWindow?.packageName?.toString() ?: return false
         return try {

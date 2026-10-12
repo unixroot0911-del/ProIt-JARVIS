@@ -88,7 +88,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "flashlight" (arg = "on" or "off"), "battery" (arg = ""), "where_am_i" (arg = ""),
               "reply_notification" (arg = "App|Contact|message text": answers an existing chat through its notification),
               "log_expense" (arg = "amount|category|note"), "log_habit" (arg = habit name),
-              "note" (arg = "topic|what to remember or review"), "set_mode" (arg = "study" or "normal"),
+              "note" (arg = "topic|what to remember or review"), "set_mode" (arg = "gaming", "ai", "study" or "normal" = General: each mode has its own chat and changes how Jarvis thinks),
               "run_agent" (arg = the goal in plain words; Jarvis then operates the phone screen step by step by itself),
               "stop_agent" (arg = "" or "all": stops the screen agent, any game being played and any macro; "all" also stops live watching),
               "play" (arg = "app or game name|what to do (optional)|how long (optional, e.g. 30 minutes, 2 hours, 100 times, forever)":
@@ -184,11 +184,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             s.contains("could not find an app called") || s.contains("bluetooth settings to pair")
     }
 
-    private fun studyRules(): String =
-        if (prefs.mode == "study")
-            "\n\nSTUDY MODE is ON: act as a sharp tutor. Explain simply, then test the user with one question at a time, " +
-                "correct them directly, and save weak points with the \"note\" action so they can be reviewed later."
-        else ""
+    private fun studyRules(): String = Modes.rules(Modes.norm(prefs.mode))
 
     private fun factsBlock(): String {
         val facts = memory.facts()
@@ -201,7 +197,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
         val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
         return try {
-            parse(complete(system, userText, memory.recentTurns(8).filterNot { stale(it.text) }, imageB64, json = true))
+            parse(complete(system, userText, memory.recentTurns(8).filterNot { stale(it.text) }, imageB64, json = true, big = Modes.norm(prefs.mode) == "ai"))
         } catch (e: Exception) {
             Decision(e.message ?: "The brain is unreachable.", failed = true)
         }

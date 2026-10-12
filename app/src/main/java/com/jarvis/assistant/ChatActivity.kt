@@ -37,6 +37,26 @@ class ChatActivity : AppCompatActivity() {
     private var typing: View? = null
     private val maxBubble by lazy { (resources.displayMetrics.widthPixels * 0.78f).toInt() }
 
+    private lateinit var modeRow: LinearLayout
+    private val modeSub: () -> Unit = { runOnUiThread { refreshModeUi(); reloadChat() } }
+
+    private fun reloadChat() {
+        list.removeAllViews()
+        typing = null
+        for (t in memory.recentChat(80)) add(t.role, t.text)
+    }
+
+    private fun refreshModeUi() {
+        val cur = Modes.current(this)
+        for (i in 0 until modeRow.childCount) {
+            val tv = modeRow.getChildAt(i) as TextView
+            val on = Modes.all[i] == cur
+            tv.setTextColor(if (on) Color.parseColor("#05080F") else Color.parseColor("#2AA8FF"))
+            tv.setBackgroundColor(if (on) Color.parseColor("#2AA8FF") else Color.parseColor("#0E1A2B"))
+        }
+        input.hint = Modes.hint(cur)
+    }
+
     private val sub: (String, String) -> Unit = { role, text ->
         runOnUiThread {
             if (role == "jarvis") hideTyping()
@@ -56,14 +76,15 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        list.removeAllViews()
-        typing = null
-        for (t in memory.recentChat(80)) add(t.role, t.text)
+        reloadChat()
+        refreshModeUi()
+        Modes.listeners.add(modeSub)
         ChatBus.listeners.add(sub)
     }
 
     override fun onStop() {
         ChatBus.listeners.remove(sub)
+        Modes.listeners.remove(modeSub)
         super.onStop()
     }
 
@@ -137,7 +158,19 @@ class ChatActivity : AppCompatActivity() {
         inputRow.addView(mic, LinearLayout.LayoutParams(-2, -2))
         inputRow.addView(send, LinearLayout.LayoutParams(-2, -2))
 
+        modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(16, 0, 16, 8) }
+        for (k in Modes.all) {
+            val tv = TextView(this).apply {
+                text = Modes.label(k)
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setPadding(0, 16, 0, 16)
+                setOnClickListener { Modes.set(this@ChatActivity, k) }
+            }
+            modeRow.addView(tv, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 4, 0) })
+        }
         root.addView(bar, LinearLayout.LayoutParams(-1, -2))
+        root.addView(modeRow, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(inputRow, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)

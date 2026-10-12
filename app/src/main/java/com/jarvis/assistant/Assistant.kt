@@ -124,7 +124,7 @@ class Assistant(context: Context) {
     ): Reply {
         // 1. Instant commands: no internet, no AI quota.
         if (imageB64 == null) {
-            val off = Offline.parse(text, actions)
+            val off = if (Modes.current(appContext) == "ai") Offline.parseControl(text) else Offline.parse(text, actions)
             if (off != null) {
                 val type = off.actionType
                 val status = if (type != null) execute(type, off.actionArg ?: "", confirm, onProgress) else null
@@ -137,7 +137,8 @@ class Assistant(context: Context) {
         val mentions = withContext(Dispatchers.IO) { actions.mentions(text) }
         val ctx = withContext(Dispatchers.IO) {
             buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
-                (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "")
+                (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "") +
+                (if (Modes.current(appContext) == "gaming") "Installed games: " + Modes.installedGames(appContext).joinToString(", ").ifBlank { "none detected" } + "\n" else "")
         }
         var d = brain.think(text, ctx, imageB64)
         val question = d.reply.trim().let { it.endsWith("?") || it.endsWith("؟") }
@@ -304,10 +305,7 @@ class Assistant(context: Context) {
                     withContext(Dispatchers.IO) { memory.addNote(p.getOrElse(0) { "note" }, p.getOrElse(1) { p[0] }) }
                     "Saved to your study notes."
                 }
-                t == "set_mode" -> {
-                    prefs.mode = if (arg.trim().lowercase() == "study") "study" else "normal"
-                    "Mode: ${prefs.mode}."
-                }
+                t == "set_mode" -> Modes.set(appContext, arg)
                 t == "run_agent" -> redirectPlay(arg) ?: startAgent(arg, confirm, onProgress)
                 t == "set_voice" -> when (arg.trim().lowercase()) {
                     "force", "force_on" -> { prefs.forceVoice = true; prefs.speakReplies = true; "Forced voice ON: I speak everything aloud, always." }

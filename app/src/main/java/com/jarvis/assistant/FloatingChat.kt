@@ -38,6 +38,17 @@ class FloatingChat(
     private var scroll: ScrollView? = null
     private var input: EditText? = null
     private var micChip: TextView? = null
+    private var modeChipView: TextView? = null
+    private val modeSub: () -> Unit = {
+        Handler(Looper.getMainLooper()).post {
+            modeChipView?.text = Modes.label(Modes.current(ctx))
+            val l = list
+            if (l != null) {
+                l.removeAllViews(); typing = null
+                for (t in assistant.recentChat(10)) add(t.role, t.text)
+            }
+        }
+    }
     private var typing: View? = null
     private var busy = false          // microphone only
     private var inflight = 0           // messages being answered right now; typing is never blocked
@@ -107,6 +118,12 @@ class FloatingChat(
         val mic = chip("MIC") { micTapped() }
         micChip = mic
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
+        val modeChip = chip(Modes.label(Modes.current(ctx))) {
+            val next = Modes.all[(Modes.all.indexOf(Modes.current(ctx)) + 1) % Modes.all.size]
+            Modes.set(ctx, next)
+        }
+        modeChipView = modeChip
+        header.addView(modeChip)
         header.addView(mic)
         header.addView(chip("APP") {
             ctx.startActivity(Intent(ctx, ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -178,11 +195,13 @@ class FloatingChat(
         root = panel
         lp = params
         for (t in assistant.recentChat(10)) add(t.role, t.text)
+        Modes.listeners.add(modeSub)
         ChatBus.listeners.add(sub)
     }
 
     fun hide() {
         ChatBus.listeners.remove(sub)
+        Modes.listeners.remove(modeSub)
         root?.let {
             try { wm.removeView(it) } catch (e: Exception) { /* already gone */ }
         }

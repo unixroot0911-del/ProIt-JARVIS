@@ -9,7 +9,9 @@ data class Turn(val role: String, val text: String)
 data class Notif(val app: String, val pkg: String, val title: String, val text: String, val ts: Long)
 
 /** Long-term memory, all on-device: facts, conversation, notifications, money, habits, study notes. */
-class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 3) {
+class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 4) {
+
+    private val app: Context = context.applicationContext
 
     companion object {
         @Volatile private var inst: Memory? = null
@@ -21,11 +23,21 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         db.execSQL("CREATE TABLE facts (id INTEGER PRIMARY KEY AUTOINCREMENT, fact TEXT UNIQUE, ts INTEGER)")
         db.execSQL("CREATE TABLE turns (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, text TEXT, ts INTEGER)")
         createV2(db)
+        addMode(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 3) createV2(db)
+        if (oldVersion < 4) addMode(db)
     }
+
+    private fun addMode(db: SQLiteDatabase) {
+        for (t in listOf("chat", "turns")) {
+            try { db.execSQL("ALTER TABLE " + t + " ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'") } catch (e: Exception) { /* already there */ }
+        }
+    }
+
+    private fun mode(): String = Modes.current(app)
 
     private fun createV2(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY AUTOINCREMENT, pkg TEXT, app TEXT, title TEXT, text TEXT, ts INTEGER)")
@@ -53,13 +65,13 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     }
 
     fun addTurn(role: String, text: String) {
-        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()) }
+        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()) }
         writableDatabase.insert("turns", null, cv)
     }
 
     fun recentTurns(limit: Int = 12): List<Turn> {
         val out = ArrayList<Turn>()
-        readableDatabase.rawQuery("SELECT role, text FROM turns ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use {
+        readableDatabase.rawQuery("SELECT role, text FROM turns WHERE mode = ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()
@@ -68,15 +80,15 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     // ---- visible chat history ----
 
     fun addChat(role: String, text: String) {
-        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()) }
+        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()) }
         val db = writableDatabase
         db.insert("chat", null, cv)
-        db.execSQL("DELETE FROM chat WHERE id < (SELECT MAX(id) FROM chat) - 500")
+        db.execSQL("DELETE FROM chat WHERE id < (SELECT MAX(id) FROM chat) - 1500")
     }
 
     fun recentChat(limit: Int): List<Turn> {
         val out = ArrayList<Turn>()
-        readableDatabase.rawQuery("SELECT role, text FROM chat ORDER BY id DESC LIMIT ?", arrayOf(limit.toString())).use {
+        readableDatabase.rawQuery("SELECT role, text FROM chat WHERE mode = ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()

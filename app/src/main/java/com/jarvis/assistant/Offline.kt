@@ -33,6 +33,7 @@ object Offline {
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
     private val open = rx("^(?:open|launch|start|play|run|go to|let'?s(?: play| open| start| go| run| go to)?|lets(?: play| open| start| go)?|افتح|حل|شغل|العب|يلا|هيا|خلينا|نلعبو|لنلعب|ندير)\\s+(.{2,25})$")
     private val playApp = rx("^(?:play|العب|لنلعب|نلعبو|خلينا نلعب|يلا نلعب|let'?s play|lets play|start playing)\\s+(.{2,30})$")
+    private val modeCmd = rx("^(?:(?:please|switch to|switch|change to|go to|activate|enable|turn on|set|فعل|شغل|حول إلى|حول الى|بدل إلى|بدل الى|افتح|اختر) )?(?:(?:general|normal|gaming|game|ai|study) mode|mode (?:general|normal|gaming|game|ai|study)|(?:وضع|الوضع|مود) ?(?:الألعاب|الالعاب|ألعاب|العاب|العادي|عادي|عام|الذكاء الاصطناعي|الذكاء|ذكاء|الدراسة|دراسة))$")
     private val lastErr = rx("^(last error|show error|show the error|what went wrong|آخر خطأ|اخر خطأ|اخر خطا|آخر خطا|شنو وقع|ما الخطأ)$")
     private val playCur = rx("^(?:keep playing(?: it)?|continue playing|play it|play this(?: game)?|play the current game|play now|كمل اللعب|واصل اللعب|العبها|العب هذه اللعبة|العب اللعبة|ابدأ اللعب)$")
     private val converseOn = rx("^(conversation mode|talk to me|let'?s talk|hands.?free( mode)?|وضع المحادثة|كلمني|تكلم معي|هضر معايا)$")
@@ -42,12 +43,22 @@ object Offline {
     private val cont = rx("^(continue|continue task|keep going|resume task|كمل المهمة|واصل|واصل المهمة)$")
     private val call = rx("^(?:call|اتصل ب|اتصل بـ|اتصل|عيط ل|عيط على|كلم)\\s+(.{2,25})$")
 
+    /** AI mode keeps the phone quiet: only stopping and switching modes are understood instantly. */
+    fun parseControl(raw: String): Decision? {
+        val t = raw.trim().trimEnd('.', '!', '?', '؟', '،').replace(Regex("\\s+"), " ")
+        if (t.isEmpty() || t.length > 60) return null
+        if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", "")
+        if (modeCmd.matches(t)) return d(t, "Switching mode.", "جاري تغيير الوضع.", "set_mode", t)
+        return null
+    }
+
     fun parse(raw: String, actions: Actions): Decision? {
         val t = raw.trim().trimEnd('.', '!', '?', '؟', '،').replace(Regex("\\s+"), " ")
         if (t.isEmpty() || t.length > 60) return null
 
         if (stopAgent.matches(t)) return d(t, "Stopping the agent.", "تم إيقاف الوكيل.", "stop_agent", if (Regex("everything|all|كل").containsMatchIn(t)) "all" else "")
 
+        if (modeCmd.matches(t)) return d(t, "Switching mode.", "جاري تغيير الوضع.", "set_mode", t)
         if (lastErr.matches(t)) return d(t, "Here is the last error.", "هذا آخر خطأ.", "last_error", "")
         if (playCur.matches(t)) return d(t, "Playing what is on your screen.", "جاري اللعب.", "play", "||")
         playApp.find(t)?.let { m ->
