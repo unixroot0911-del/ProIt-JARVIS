@@ -40,12 +40,14 @@ Respond ONLY with JSON: {"steps":["step 1","step 2"]}"""
 
     private val connectors = Regex("(?i)\\b(then|after that|afterwards|next|and then|finally|also)\\b|ثم|بعدها|بعد ذلك|بعد ما|وبعد|وبعدين|وفي الأخير|أخيرا|اخيرا|;|\\n|\\d\\s*[.)]\\s")
 
-    private fun load(ctx: Context): Task? = try {
-        val s = ctx.getSharedPreferences("jarvis_task", Context.MODE_PRIVATE).getString("cur", null) ?: return null
-        val o = JSONObject(s)
-        val st = o.getJSONArray("steps"); val dn = o.getJSONArray("done")
-        Task(o.getString("goal"), (0 until st.length()).map { st.getString(it) }, BooleanArray(st.length()) { dn.optBoolean(it, false) }, ctx.applicationContext)
-    } catch (e: Exception) { null }
+    private fun load(ctx: Context): Task? {
+        return try {
+            val s = ctx.getSharedPreferences("jarvis_task", Context.MODE_PRIVATE).getString("cur", null) ?: return null
+            val o = JSONObject(s)
+            val st = o.getJSONArray("steps"); val dn = o.getJSONArray("done")
+            Task(o.getString("goal"), (0 until st.length()).map { st.getString(it) }, BooleanArray(st.length()) { dn.optBoolean(it, false) }, ctx.applicationContext)
+        } catch (e: Exception) { null }
+    }
 
     fun clear(ctx: Context) {
         try { ctx.getSharedPreferences("jarvis_task", Context.MODE_PRIVATE).edit().remove("cur").apply() } catch (e: Exception) { /* ignore */ }
