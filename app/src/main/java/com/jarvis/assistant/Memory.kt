@@ -9,7 +9,7 @@ data class Turn(val role: String, val text: String)
 data class Notif(val app: String, val pkg: String, val title: String, val text: String, val ts: Long)
 
 /** Long-term memory, all on-device: facts, conversation, notifications, money, habits, study notes. */
-class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 4) {
+class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 5) {
 
     private val app: Context = context.applicationContext
 
@@ -24,11 +24,69 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         db.execSQL("CREATE TABLE turns (id INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT, text TEXT, ts INTEGER)")
         createV2(db)
         addMode(db)
+        createDossier(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 3) createV2(db)
         if (oldVersion < 4) addMode(db)
+        if (oldVersion < 5) createDossier(db)
+    }
+
+    private fun createDossier(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS dossier (kind TEXT NOT NULL, name TEXT NOT NULL, k TEXT NOT NULL, v TEXT NOT NULL, ts INTEGER, PRIMARY KEY (name, k))")
+    }
+
+    fun dossierPut(kind: String, name: String, k: String, v: String) {
+        val cv = ContentValues().apply { put("kind", kind); put("name", name); put("k", k); put("v", v); put("ts", System.currentTimeMillis()) }
+        writableDatabase.insertWithOnConflict("dossier", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Rows of one dossier as [kind, key, value]. */
+    fun dossierRows(name: String): List<Array<String>> {
+        val out = ArrayList<Array<String>>()
+        readableDatabase.rawQuery("SELECT kind, k, v FROM dossier WHERE name = ? ORDER BY ts DESC", arrayOf(name)).use {
+            while (it.moveToNext()) out.add(arrayOf(it.getString(0), it.getString(1), it.getString(2)))
+        }
+        return out
+    }
+
+    fun dossierAllRows(): List<Array<String>> {
+        val out = ArrayList<Array<String>>()
+        readableDatabase.rawQuery("SELECT kind, name, k, v FROM dossier WHERE k != 'plays' AND k != 'minutes' ORDER BY kind, name, ts DESC LIMIT 400", null).use {
+            while (it.moveToNext()) out.add(arrayOf(it.getString(0), it.getString(1), it.getString(3)))
+        }
+        return out
+    }
+
+    fun dossierNames(): List<String> {
+        val out = ArrayList<String>()
+        readableDatabase.rawQuery("SELECT DISTINCT name FROM dossier", null).use { while (it.moveToNext()) out.add(it.getString(0)) }
+        return out
+    }
+
+    fun dossierForget(name: String, k: String): Int {
+        val db = writableDatabase
+        return if (k.isBlank()) db.delete("dossier", "name = ?", arrayOf(name)) else db.delete("dossier", "name = ? AND k = ?", arrayOf(name, k))
+    }
+
+    fun topPlayed(n: Int): List<String> {
+        val out = ArrayList<String>()
+        readableDatabase.rawQuery("SELECT name FROM dossier WHERE k = 'plays' AND kind = 'game' ORDER BY CAST(v AS INTEGER) DESC LIMIT ?", arrayOf(n.toString())).use {
+            while (it.moveToNext()) out.add(it.getString(0))
+        }
+        return out
+    }
+
+    /** Short digest of what was said in the OTHER modes, so nothing is forgotten when the mode changes. */
+    fun otherModesDigest(n: Int): String {
+        val sb = StringBuilder()
+        readableDatabase.rawQuery("SELECT mode, role, text FROM turns WHERE mode != ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), n.toString())).use {
+            val rows = ArrayList<String>()
+            while (it.moveToNext()) rows.add("[" + it.getString(0) + "] " + (if (it.getString(1) == "user") "user" else "me") + ": " + it.getString(2).replace("\n", " ").take(160))
+            rows.reversed().forEach { r -> sb.append(r).append('\n') }
+        }
+        return sb.toString().trim()
     }
 
     private fun addMode(db: SQLiteDatabase) {

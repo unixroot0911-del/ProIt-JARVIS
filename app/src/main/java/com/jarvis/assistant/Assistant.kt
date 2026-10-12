@@ -30,6 +30,22 @@ class Assistant(context: Context) {
         return c.timeInMillis
     }
 
+    private fun memoryBlock(text: String, mentions: List<String>): String {
+        return try {
+            val low = text.lowercase()
+            val names = LinkedHashSet<String>()
+            mentions.forEach { names.add(Dossier.canon(appContext, it)) }
+            for (n in memory.dossierNames()) if (n.length >= 3 && low.contains(n)) names.add(n)
+            names.add("user")
+            var s = Dossier.text(appContext, names)
+            if (Modes.current(appContext) == "gaming") {
+                val top = memory.topPlayed(6)
+                if (top.isNotEmpty()) s += (if (s.isEmpty()) "" else "\n") + "Games played most: " + top.joinToString(", ")
+            }
+            if (s.isBlank()) "" else "SECTIONED MEMORY (what I know about what the user mentions; obey the standing orders):\n" + s + "\n"
+        } catch (e: Exception) { "" }
+    }
+
     private fun clip(s: String, n: Int) = if (s.length <= n) s else s.take(n) + "..."
 
     fun recentChat(n: Int): List<Turn> = memory.recentChat(n)
@@ -138,6 +154,7 @@ class Assistant(context: Context) {
         val ctx = withContext(Dispatchers.IO) {
             buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
                 (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "") +
+                memoryBlock(text, mentions) +
                 (if (Modes.current(appContext) == "gaming") "Installed games: " + Modes.installedGames(appContext).joinToString(", ").ifBlank { "none detected" } + "\n" else "")
         }
         var d = brain.think(text, ctx, imageB64)
@@ -280,6 +297,16 @@ class Assistant(context: Context) {
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
                 t == "stop_agent" || t == "stop_play" || t == "stop_macro" -> Player.stopAll(arg.trim().lowercase() == "all")
                 t == "play" || t == "play_game" || t == "automate" -> Player.startAI(appContext, brain, arg)
+                t == "remember" -> {
+                    val p = arg.split("|", limit = 4).map { it.trim() }
+                    if (p.size < 4 || p[1].isEmpty() || p[3].isEmpty()) "To file that I need kind|name|key|value."
+                    else { Dossier.put(appContext, p[0], p[1], p[2], p[3]); "Filed under " + p[1] + "." }
+                }
+                t == "forget_about" -> {
+                    val p = arg.split("|", limit = 2).map { it.trim() }
+                    Dossier.forget(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" })
+                }
+                t == "memory_show" -> Dossier.overview(appContext, arg)
                 t == "last_error" -> Diag.report(appContext)
                 t == "play_memory" -> Player.memoryReport(appContext, arg)
                 t == "play_forget" -> Player.forget(appContext, arg)

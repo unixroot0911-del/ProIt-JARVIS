@@ -42,10 +42,10 @@ object UserWatch {
     private fun mine(now: Long): Boolean = own.any { abs(it - now) < 350 }
 
     fun onTouch() {
-        if (!armed) return
         val now = System.currentTimeMillis()
         if (mine(now)) return
         lastUser = now
+        if (!armed) return
         if (!Touch.paused) { epoch++; Touch.pause() }
     }
 

@@ -181,6 +181,7 @@ class ScreenAgent(private val context: Context, private val brain: Brain) {
           {"type": one of "click","type","enter","scroll_down","scroll_up","back","home","open_app","tap_xy","wait","done","ask",
            "index": number (for click/type), "text": string (for type), "app": string (for open_app),
            "x": 0..1, "y": 0..1 (for tap_xy: fractions of the screen width and height, only when the element is missing from the list, e.g. games or custom views),
+           "ok": false only for done when you could NOT do it (default true),
            "reason": short sentence (for done: the result for the user; for ask: what you need from the user; for tap_xy: what you tap)}
         Rules:
         - One step at a time. Prefer open_app to start. Use "done" as soon as the goal is achieved.
@@ -201,7 +202,36 @@ class ScreenAgent(private val context: Context, private val brain: Brain) {
         }
     }
 
+    @Volatile private var lastOk = true
+
     suspend fun run(goal: String, onProgress: (String) -> Unit, confirm: suspend (String) -> Boolean): String {
+        if (JarvisAccessibilityService.instance == null) {
+            return "The screen agent is off. Enable 'Jarvis screen agent' in Settings, Accessibility."
+        }
+        val task = TaskMem.begin(context, brain, goal)
+        if (task.steps.size <= 1) { TaskMem.clear(context); return runOne(goal, onProgress, confirm) }
+        var lastResult = ""
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val i = task.next()
+            if (i < 0) break
+            val doneBefore = task.steps.indices.filter { task.done[it] }.joinToString("; ") { task.steps[it].take(60) }
+            val sub = "OVERALL ORDER (context only): " + goal.take(400) + "\nAlready finished: " + doneBefore.ifBlank { "nothing" } +
+                "\nDO THIS NOW, ONLY THIS, then answer done: " + task.steps[i]
+            val r = runOne(sub, onProgress, confirm)
+            val bad = !lastOk || r.startsWith("I need your input") || r.startsWith("Stopped") || r.startsWith("Agent stopped") ||
+                r.startsWith("The screen agent is off") || r.startsWith("Screen agent disconnected")
+            if (bad) return "Stopped at step " + (i + 1) + " of " + task.steps.size + " (" + task.steps[i].take(70) + "): " + r + "\nSay \"continue\" and I resume from this step; the finished steps are saved."
+            task.markDone(i)
+            lastResult = r
+            delay(500)
+        }
+        TaskMem.clear(context)
+        return "Finished all " + task.steps.size + " steps. " + lastResult
+    }
+
+    private suspend fun runOne(goal: String, onProgress: (String) -> Unit, confirm: suspend (String) -> Boolean): String {
+        lastOk = true
         if (JarvisAccessibilityService.instance == null) {
             return "The screen agent is off. Enable 'Jarvis screen agent' in Settings, Accessibility."
         }
@@ -255,7 +285,7 @@ class ScreenAgent(private val context: Context, private val brain: Brain) {
 
             var result = "ok"
             when (type) {
-                "done" -> return reason.ifBlank { "Done." }
+                "done" -> { lastOk = o.optBoolean("ok", true); return reason.ifBlank { "Done." } }
                 "ask" -> return "I need your input: $reason"
                 "click" -> {
                     val node = screen?.nodes?.getOrNull(idx)

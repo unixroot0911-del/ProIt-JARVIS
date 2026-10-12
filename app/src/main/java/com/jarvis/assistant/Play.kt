@@ -249,7 +249,7 @@ HOW TO PLAY:
 - A start, title, home or menu screen: press the biggest Play, Start, Tap-to-start or Continue button right away. Never answer with no actions unless the state is loading or a controller is running: an idle phone loses the game. If no button is clear, tap the middle of the screen.
 - NEVER spend real money (Buy, Subscribe, Pay, Install, Update, anything with a price). Never type passwords or card data. A payment screen: press back. Wrong app in front: open_app. If the screen did not change after your last move, do something different.
 ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO dialog appears; no answer in a minute = your default): ask only when it truly matters to them: the first cutscene or long video (skip it?), a story choice that changes the outcome, something irreversible, spending a rare resource, deleting progress. Decide everything routine yourself. If "Standing answers" already has your key, apply it silently. When you ask, actions and reflex are ignored that turn.
-"done": true only when the goal is fully achieved or truly impossible. "say" stays empty except for a real milestone or problem: one short sentence in the user's language (Arabic or Darija if they use it). "next_ms": 1000 to 8000; short when using a reflex."""
+"done": true only when the goal is fully achieved or truly impossible. "say" stays empty except for a real milestone or problem: one short natural sentence in the user's language (Arabic or Darija if they use it), like a player talking to a friend: NEVER coordinates, grid numbers, button names or positions, and never the words tap, hold or swipe. "step_done": true only when a LONG TASK checklist is shown and the step marked NOW is finished. "next_ms": 1000 to 8000; short when using a reflex."""
 
     private fun mem(ctx: Context) = ctx.getSharedPreferences("jarvis_play_mem", Context.MODE_PRIVATE)
 
@@ -390,12 +390,17 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         }
     }
 
+    /** In-app chat only: nothing goes to Telegram while the user is at the phone. */
     private fun report(ctx: Context, text: String) {
         ChatBus.publish("jarvis", text)
         Engine.scope.launch(Dispatchers.IO) {
             try { Memory.get(ctx).addChat("jarvis", text) } catch (e: Exception) { /* ignore */ }
-            try { Telegram.sendToOwner(Prefs(ctx), text) } catch (e: Exception) { /* ignore */ }
         }
+    }
+
+    private fun reportT(ctx: Context, text: String) {
+        report(ctx, text)
+        Engine.scope.launch(Dispatchers.IO) { try { Telegram.sendToOwner(Prefs(ctx), text) } catch (e: Exception) { /* ignore */ } }
     }
 
     private fun notifyOn(ctx: Context, text: String) {
@@ -493,6 +498,44 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
     }
 
     /** arg = "app or game|what to do (optional)|how long (optional)". Examples: "Monoposto||30 minutes", "Clash of Clans|collect resources and train troops|2 hours". */
+    private val aloneRx = Regex("(?i)\\b(alone|by yourself|on your own|yourself|solo|automatically)\\b|وحدك|لوحدك|بنفسك|بوحدك|تلقائي|اوتوماتيك")
+
+    /**
+     * After opening a game: if the user is not playing, ask on the screen whether Jarvis should take the wheel.
+     * If the user is playing (or says NO) it waits until they have stopped for a while, then asks again.
+     */
+    private suspend fun gameGate(ctx: Context, name: String, pkg: String): Boolean {
+        val t0 = System.currentTimeMillis() - 10_500
+        var asks = 0
+        var away = 0L
+        var warned = false
+        while (asks < 12) {
+            currentCoroutineContext().ensureActive()
+            val svc = JarvisAccessibilityService.instance ?: return false
+            val front = svc.rootInActiveWindow?.packageName?.toString() ?: ""
+            val now = System.currentTimeMillis()
+            if (front != pkg && !front.contains("systemui", true)) {
+                if (away == 0L) away = now
+                if (now - away > 180_000) return false
+                delay(2000); continue
+            }
+            away = 0L
+            val userPlaying = UserWatch.lastUser > t0 && now - UserWatch.lastUser < 25_000
+            val everTouched = UserWatch.lastUser > t0
+            if (userPlaying || (asks > 0 && now - UserWatch.lastUser < 25_000)) { delay(1500); continue }
+            if (!Settings.canDrawOverlays(ctx) && Engine.foreground == null) {
+                if (!warned) { warned = true; report(ctx, "To ask you on the game screen I need the permission \"Display over other apps\" for Jarvis (Settings, Apps, Jarvis).") }
+                delay(5000); continue
+            }
+            val ans = Ask.yesNo(ctx, "[$name]\n\nDo you want me to take the wheel?\n(I will play by myself in front of you.)", 45_000)
+            asks++
+            if (ans == true) return true
+            // NO or no answer: leave the game to the user, ask again after they have stopped playing for a while
+            delay(if (everTouched) 20_000 else 60_000)
+        }
+        return false
+    }
+
     private val playRx = Regex("(?i)\\b(play|playing|game|games|level|race|racing|drive|driving|grind|farm|battle|spin|quest)\\b|العب|لعب|لعبة|ألعاب|سباق|قيادة|مرحلة|معركة")
     private val notGame = Regex("(?i)music|song|songs|video|youtube|spotify|podcast|playlist|أغنية|اغنية|موسيقى|فيديو|مقطع")
 
@@ -522,16 +565,34 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         if (appName.isNotBlank() && pkg == null) {
             return "I could not find an app or game called \"$appName\" on this phone. Tell me its exact name, or install it and ask again."
         }
+        val custom = goalText.isNotBlank()
+        val isGame = pkg != null && (Dossier.isGame(ctx, pkg) || playRx.containsMatchIn(goalText))
+        val alone = aloneRx.containsMatchIn(goalText)
+        val gate = pkg != null && isGame && !alone
         val goal = goalText.ifBlank { "Play ${appName.ifBlank { "the app on screen" }} well and keep going: progress, collect rewards, avoid losing, close ads and popups." }
         val app = ctx.applicationContext
         label = appName.ifBlank { "current screen" }
-        job = Engine.scope.launch { aiLoop(app, brain, label, goal, pkg, limit) }
+        val shownLabel = label
+        job = Engine.scope.launch {
+            var launched = false
+            if (pkg != null) {
+                launchPkg(app, pkg)
+                delay(if (isGame) 10_000L else 5_000L)
+                launched = true
+                if (gate && !gameGate(app, shownLabel, pkg)) {
+                    job = null; label = ""
+                    report(app, "OK, I will stay out of $shownLabel. Tell me to play it whenever you want me to.")
+                    return@launch
+                }
+            }
+            aiLoop(app, brain, label, goal, pkg, limit, custom, launched)
+        }
         val dur = if (limit.forever) "until you say stop (8 hours max per run)" else if (limit.cycles != Int.MAX_VALUE) "${limit.cycles} rounds" else "${limit.ms / 60_000} minutes"
-        return "Playing $label for $dur. Say \"stop playing\" any time, or tap STOP in the notification. " +
-            "I will report on Telegram and here. (Online multiplayer games may ban automated accounts: your call.)"
+        if (gate) return "Opening $label. If you are not playing it yourself in a few seconds, I will ask you on the screen whether I should take the wheel."
+        return "Playing $label for $dur. Say \"stop playing\" any time, or tap STOP in the notification."
     }
 
-    private suspend fun aiLoop(ctx: Context, brain: Brain, name: String, goal: String, pkg: String?, limit: Limit) {
+    private suspend fun aiLoop(ctx: Context, brain: Brain, name: String, goal: String, pkg: String?, limit: Limit, custom: Boolean, launched: Boolean) {
         val lock = wake(ctx, limit.ms + 120_000)
         notifyOn(ctx, name)
         val started = System.currentTimeMillis()
@@ -545,6 +606,9 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val decisions = HashMap<String, String>()
         for ((k, v) in sp.all) if (k.startsWith("dec:$memKey:") && v is String) decisions[k.removePrefix("dec:$memKey:")] = v
         val scope = CoroutineScope(currentCoroutineContext())
+        val task: TaskMem.Task? = if (custom) TaskMem.begin(ctx, brain, goal) else null
+        val isGameRun = pkg != null && Dossier.isGame(ctx, pkg)
+        val dossierTxt = Dossier.text(ctx, listOfNotNull(Dossier.canon(ctx, name), pkg?.let { Dossier.label(ctx, it).lowercase() }, pkg))
         Touch.start(ctx)
         stepTrace = 0
         UserWatch.arm(pkg)
@@ -586,7 +650,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
         val history = ArrayDeque<String>()
         var ended = "Finished playing $name."
         try {
-            if (pkg != null) { launchPkg(ctx, pkg); delay(4500) }
+            if (pkg != null && !launched) { launchPkg(ctx, pkg); delay(4500) }
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
                 if (now - started > limit.ms) { ended = "Finished playing $name: the time you asked for is up. Ask me again any time."; break }
@@ -682,7 +746,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                             screens.put(st, info.optString("controls").take(500))
                             saveScreens(sp, memKey, size, screens)
                         }
-                        report(ctx, "I see: $g (${info.optString("genre")}), screen: $st.\nControls: ${info.optString("controls")}\nPlan: ${info.optString("goal")}".take(900))
+                        // quiet
                     } else {
                         report(ctx, "[$name] I could not read the game screen yet. I will keep trying while I play.")
                     }
@@ -694,6 +758,8 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 val prompt = "GOAL: $goal\nApp in front: $front\nTurn: ${turns + 1}\n" +
                     (if (knowledge.isNotBlank()) "What I know about this game: $knowledge\n" else "") +
                     (if (screens.length() > 0) "Remembered controls for this screen size (trust them unless the screenshot contradicts them; correct them with \"layout\" if they changed): ${screensText(screens)}\n" else "") +
+                    (if (dossierTxt.isNotBlank()) "What I have filed about this ${if (isGameRun) "game" else "app"} (including the user's standing orders: obey them every time):\n$dossierTxt\n" else "") +
+                    (if (task != null && task.steps.size > 1) task.block() + "\n" else "") +
                     (if (lessonList.isNotEmpty()) "Lessons from earlier plays (strategy memory):\n" + lessonList.joinToString("\n") { "- $it" } + "\n" else "") +
                     (if (learned.isNotBlank()) "Notes from earlier sessions: $learned\n" else "") +
                     "Standing answers from the user: ${decisions.entries.joinToString { it.key + "=" + it.value }.ifBlank { "none" }}\n" +
@@ -758,7 +824,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 var learnedNow = ""
                 if (lesson.length > 8 && !lesson.equals("null", true)) { addLesson(sp, memKey, lessonList, lesson); learnedNow = lesson }
                 val tn = System.currentTimeMillis()
-                if (see.isNotEmpty() && tn - lastNarr > 20_000) {
+                if (false && see.isNotEmpty() && tn - lastNarr > 20_000) {
                     lastNarr = tn
                     val line = "[$name | ${lastState.ifBlank { "?" }}] $see -> " + (if (lastAhead.isNotEmpty()) "expecting: $lastAhead; " else "") + "now: $plan" +
                         (if (learnedNow.isNotEmpty()) "\nLearned: $learnedNow" else "")
@@ -780,7 +846,7 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                     if (known != null) {
                         lastDecision = "standing answer $key=$known: apply it, do not ask again."
                     } else {
-                        report(ctx, "[$name] $q  (answer YES or NO on the phone screen)")
+                        // quiet
                         val ans = Ask.yesNo(ctx, "[$name]\n\n$q\n\n(No answer in 60 s means ${if (def) "YES" else "NO"}.)", 60_000)
                         val yes = ans ?: def
                         lastDecision = "the user answered ${if (yes) "YES" else "NO"}${if (ans == null) " (no reply, default)" else ""} to: $q"
@@ -830,8 +896,15 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
                 while (history.size > 5) history.removeFirst()
                 if (turns % 5 == 0 && note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply()
 
+                var finishedAll = o.optBoolean("done", false)
+                if (task != null && task.steps.size > 1 && (finishedAll || o.optBoolean("step_done", false))) {
+                    val c = task.next()
+                    if (c >= 0) task.markDone(c)
+                    finishedAll = task.next() < 0
+                    if (finishedAll) TaskMem.clear(ctx)
+                }
                 val say = o.optString("say", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
-                if (o.optBoolean("done", false)) { withTimeoutOrNull(12_000) { execJob?.join() }; ended = say ?: "Done: the goal in $name is complete."; break }
+                if (finishedAll) { withTimeoutOrNull(12_000) { execJob?.join() }; ended = say ?: "Done: the goal in $name is complete."; break }
                 val t = System.currentTimeMillis()
                 if (say != null && t - lastSay > 120_000) { lastSay = t; report(ctx, "[$name] $say") }
                 else if (t - lastReport > 10 * 60_000L) { lastReport = t; report(ctx, "Still playing $name: ${(t - started) / 60_000} min, $turns turns. ${note.take(120)}") }
@@ -847,11 +920,12 @@ ASKING THE USER ("ask":{"q":"...","default":"yes","key":"short_id"}; a YES or NO
             try { if (hubOn) Hub.release() } catch (e: Exception) { /* ignore */ }
             try { if (note.isNotBlank()) sp.edit().putString("note:$memKey", note).apply() } catch (e: Exception) { /* ignore */ }
             try { bumpStats(sp, memKey, (System.currentTimeMillis() - started) / 60_000, turns) } catch (e: Exception) { /* ignore */ }
+            try { Dossier.recordUse(ctx, if (isGameRun) "game" else "app", pkg?.let { Dossier.label(ctx, it) } ?: name, (System.currentTimeMillis() - started) / 60_000) } catch (e: Exception) { /* ignore */ }
             try { lock?.let { if (it.isHeld) it.release() } } catch (e: Exception) { /* ignore */ }
             notifyOff(ctx)
             job = null
             label = ""
-            report(ctx, ended)
+            if (System.currentTimeMillis() - started > 120_000) reportT(ctx, ended) else report(ctx, ended)
         }
     }
 

@@ -94,6 +94,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "play" (arg = "app or game name|what to do (optional)|how long (optional, e.g. 30 minutes, 2 hours, 100 times, forever)":
                   Jarvis really plays the game or uses the app by itself with real touches, looking at the screen and deciding every move; the user can ask again as many times as they want),
               "last_error" (arg = "": shows the last crash or internal error Jarvis recorded),
+              "remember" (arg = "kind|name|key|value": files a fact in Jarvis' sectioned memory. kind = game, app, person, topic or preference (name "user" for preference);
+                  key = short snake_case label such as rule_skip_cutscenes, plays_often, loading_time, note; value = the fact in plain words.
+                  Use it whenever the user states a lasting rule, habit or fact: "always skip cutscenes in X", "I play X a lot", "never open Y", "Sara is my sister". Confirm in one short line),
+              "forget_about" (arg = "name" or "name|key": removes what is filed about that game, app, person or topic),
+              "memory_show" (arg = "" for the whole sectioned memory, or a name for just that one),
               "play_memory" (arg = game or app name: tells what Jarvis remembers about it: controls, lessons, how often it played),
               "play_forget" (arg = game or app name, or blank for all: forgets what Jarvis learned about that game and the user's standing yes/no answers, so it asks again),
               "macro_create" (arg = "macro name|exactly what the touch routine does": saves a repeatable touch routine, e.g. tapping a button, swiping in a pattern, daily chores in an app),
@@ -144,7 +149,12 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         Never spend money in a game. If the game is online multiplayer, add one short warning that automation can get an account banned, then do it anyway.
         "keep playing", "play it", "start it", "continue", "the current game" with no name = play with an EMPTY app name (arg "||"): it plays whatever is open on the screen.
         Never ask which game when one was just opened or talked about: use its name.
-        A repeated task at a time ("every night at 22:00 play X for 30 minutes") is schedule_task. Never say you cannot play: start it. NEVER use run_agent for a game or for "play X": run_agent is a text-only helper for settings and ordinary apps; every game, every "play", "keep playing", "continue" after a game, and every level, race or battle goes to the play action.
+        A repeated task at a time ("every night at 22:00 play X for 30 minutes") is schedule_task. Never say you cannot play: start it.
+        GAMES: "play X" opens the game, waits a few seconds, and if the user is not playing it asks them on the screen whether to take the wheel; Jarvis never starts that question itself in chat.
+        If the user says "play X alone / by yourself / وحدك" put "alone" in the goal so it plays at once. APPS (anything that is not a game, WhatsApp and messengers included) get direct orders:
+        carry out exactly what was ordered, every part of it, with no popup and no questions that the order already answers.
+        LONG ORDERS: a long or multi-part order is split into saved steps and finished completely, in order; "continue" resumes it exactly where it stopped.
+        QUIET: never tell the user coordinates, grid numbers, button positions or the words tap/hold/swipe, and never send chatter to Telegram while the user is at the phone. NEVER use run_agent for a game or for "play X": run_agent is a text-only helper for settings and ordinary apps; every game, every "play", "keep playing", "continue" after a game, and every level, race or battle goes to the play action.
         ACT, DO NOT TEACH: when the user asks for something Jarvis can do with its actions (open, change a setting, send, play, search, press, fill in, install, schedule, look at the screen),
         it does it now with the matching action and reports the result in one line. It never answers with steps, tutorials or "you can do this by..." for something it can do itself.
         If a message continues, repeats or relates to a task from the recent conversation ("do it", "again", "the same", "that one", "now the other"), it performs that task now with the earlier details.
@@ -195,7 +205,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     fun plainSystem(): String = base + studyRules() + factsBlock()
 
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
-        val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
+        val xm = try { memory.otherModesDigest(8) } catch (e: Exception) { "" }
+        val system = base + jsonRules + studyRules() + factsBlock() + (if (xm.isBlank()) "" else "\n\nRecent activity in your OTHER modes (one shared memory: never lose it because the mode changed):\n" + xm) + "\n\nPhone context:\n" + context
         return try {
             parse(complete(system, userText, memory.recentTurns(8).filterNot { stale(it.text) }, imageB64, json = true, big = Modes.norm(prefs.mode) == "ai"))
         } catch (e: Exception) {

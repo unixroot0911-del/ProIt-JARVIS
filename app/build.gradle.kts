@@ -11,8 +11,8 @@ android {
         applicationId = "com.jarvis.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 26
-        versionName = "0.9.0"
+        versionCode = 27
+        versionName = "0.10.0"
     }
 
     // One fixed signing key for every build, so a new APK installs OVER the old one and keeps all data.
