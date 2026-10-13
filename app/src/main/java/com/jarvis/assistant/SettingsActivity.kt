@@ -49,16 +49,10 @@ class SettingsActivity : AppCompatActivity() {
 
         val gemini = field(prefs.geminiKey, "Gemini API key (free: aistudio.google.com)", true)
         val groq = field(prefs.groqKey, "Groq API key (free: console.groq.com)", true)
-        val locale = field(prefs.speechLocale, "Speech language, e.g. ar-MA, ar-SA, en-US")
-        val speak = switch("Speak replies", prefs.speakReplies)
-        val force = switch("FORCE VOICE: speak everything aloud, always (alarm-level volume; ignores headphones, night and quiet rules)", prefs.forceVoice)
-        val sttAccurate = switch("Voice: Gemini first (more accurate, slower)", prefs.sttGeminiFirst)
         val study = switch("Study mode (tutor + quizzes)", prefs.mode == "study")
         val briefings = switch("Morning and evening briefings", prefs.briefingsOn)
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
-        val watchEvery = field(prefs.watchSeconds.toString(), "Seconds between looks (default 10)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
-        val watchMax = field(prefs.watchMinutes.toString(), "Auto-stop after minutes (default 90)").apply { inputType = InputType.TYPE_CLASS_NUMBER }
         val overlay = switch("Floating Jarvis: orb + chat window over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
@@ -69,17 +63,11 @@ class SettingsActivity : AppCompatActivity() {
         val save = button("SAVE") {
             prefs.geminiKey = gemini.text.toString()
             prefs.groqKey = groq.text.toString()
-            prefs.speechLocale = locale.text.toString().ifBlank { "ar-MA" }
-            prefs.speakReplies = speak.isChecked
-            prefs.forceVoice = force.isChecked
-            prefs.sttGeminiFirst = sttAccurate.isChecked
-            prefs.mode = if (study.isChecked) "study" else if (prefs.mode == "study") "normal" else prefs.mode
+            prefs.mode = if (study.isChecked) "study" else "normal"
             prefs.briefingsOn = briefings.isChecked
             prefs.morningTime = morning.text.toString().ifBlank { "07:30" }
             prefs.eveningTime = evening.text.toString().ifBlank { "21:00" }
             prefs.overlayOn = overlay.isChecked
-            prefs.watchSeconds = watchEvery.text.toString().toIntOrNull() ?: 10
-            prefs.watchMinutes = watchMax.text.toString().toIntOrNull() ?: 90
             prefs.telegramToken = tgToken.text.toString()
             Briefings.schedule(this)
             ContextCompat.startForegroundService(this, Intent(this, CoreService::class.java))
@@ -94,27 +82,8 @@ class SettingsActivity : AppCompatActivity() {
             addView(label("SETUP STATUS: what works and what is missing")); addView(statusView)
             addView(label("BRAIN 1: GEMINI")); addView(gemini)
             addView(label("BRAIN 2: GROQ (automatic fallback)")); addView(groq)
-            addView(label("VOICE")); addView(locale); addView(speak); addView(force); addView(sttAccurate)
-            addView(button("TEST VOICE (can Jarvis speak on this phone?)") {
-                prefs.forceVoice = force.isChecked
-                prefs.speakReplies = speak.isChecked
-                testResult.text = "Testing voice..."
-                val v = Voice(this@SettingsActivity, prefs)
-                lifecycleScope.launch {
-                    kotlinx.coroutines.delay(1800)
-                    testResult.text = v.status()
-                    v.speak("Jarvis voice test. If you can hear this, I can speak.", true)
-                    kotlinx.coroutines.delay(7000)
-                    v.shutdown()
-                }
-            })
-            addView(button("Voice engine settings (install the Arabic voice)") {
-                try { startActivity(Intent("com.android.settings.TTS_SETTINGS")) }
-                catch (e: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
-            })
-            addView(label("MODE")); addView(study)
+            addView(label("STUDY")); addView(study)
             addView(label("BRIEFINGS")); addView(briefings); addView(morning); addView(evening)
-            addView(label("WATCH MODE (live screen watching)")); addView(watchEvery); addView(watchMax)
             addView(label("FLOATING ORB")); addView(overlay)
             addView(button("Allow display over other apps") {
                 startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -128,9 +97,6 @@ class SettingsActivity : AppCompatActivity() {
             addView(label("PERMISSIONS (needed once)"))
             addView(button("1. Notification access (read and reply to messages)") {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            })
-            addView(button("2. Accessibility (screen agent)") {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             })
             addView(button("App info (if Android blocks restricted settings)") {
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))

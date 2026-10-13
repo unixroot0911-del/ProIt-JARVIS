@@ -24,24 +24,14 @@ class CoreService : Service() {
     private var orb: OrbView? = null
     private var orbListener: ((OrbState) -> Unit)? = null
     private var assistant: Assistant? = null
-    private var voice: Voice? = null
     private var chat: FloatingChat? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun goForeground(): Boolean {
         val notif = Notifier.build(this)
-        val micOk = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        val data = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        // With the microphone type the floating chat can record while another app is in front.
-        if (micOk) {
-            try {
-                ServiceCompat.startForeground(this, Notifier.ID, notif, data or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-                return true
-            } catch (e: Exception) { /* not allowed right now, fall back to data sync only */ }
-        }
         return try {
-            ServiceCompat.startForeground(this, Notifier.ID, notif, data)
+            ServiceCompat.startForeground(this, Notifier.ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             true
         } catch (e: Exception) {
             false
@@ -53,9 +43,7 @@ class CoreService : Service() {
         val prefs = Prefs(this)
 
         val a = assistant ?: Assistant(applicationContext).also { assistant = it }
-        val v = voice ?: Voice(applicationContext, prefs).also { voice = it }
-        if (chat == null) chat = FloatingChat(this, a, v)
-        Engine.speaker = { text -> v.speak(text) }
+        if (chat == null) chat = FloatingChat(this, a)
         Scheduler.rearmAll(this)
 
         if (botJob?.isActive != true) {
@@ -126,11 +114,9 @@ class CoreService : Service() {
     }
 
     override fun onDestroy() {
-        Engine.speaker = null
         chat?.hide()
         hideOrb()
         botJob?.cancel()
-        voice?.shutdown()
         super.onDestroy()
     }
 }

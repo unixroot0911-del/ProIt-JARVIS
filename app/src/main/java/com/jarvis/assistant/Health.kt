@@ -36,10 +36,8 @@ object Health {
         fun perm(x: String) = ContextCompat.checkSelfPermission(ctx, x) == PackageManager.PERMISSION_GRANTED
 
         line(p.geminiKey.isNotEmpty(), "Gemini key (brain, vision, web search)", "add it under BRAIN 1")
-        line(p.groqKey.isNotEmpty(), "Groq key (fast brain, voice)", "add it under BRAIN 2")
-        line(perm(Manifest.permission.RECORD_AUDIO), "Microphone", "allow it when asked")
+        line(p.groqKey.isNotEmpty(), "Groq key (fast brain)", "add it under BRAIN 2")
         line(NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName), "Notification access", "button 1 below")
-        line(JarvisAccessibilityService.instance != null, "Screen agent and screenshots (Accessibility)", "button 2 below; turn Jarvis off and on again")
         line(Settings.canDrawOverlays(ctx), "Floating orb and chat over other apps", "press 'Allow display over other apps'")
         line(perm(Manifest.permission.READ_CONTACTS) && perm(Manifest.permission.SEND_SMS), "Contacts and SMS", "button 3 below")
         line(perm(Manifest.permission.READ_CALENDAR), "Calendar", "button 3 below")

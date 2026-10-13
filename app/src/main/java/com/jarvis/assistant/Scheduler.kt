@@ -256,7 +256,7 @@ object Scheduler {
 
 /**
  * Discreet delivery. No ringtone, no clock app, nothing that makes noise in public:
- * a gentle vibration and a silent pop-up; Jarvis speaks only when headphones are connected; at night only a silent pop-up
+ * a gentle vibration and a silent pop-up; at night only a silent pop-up
  * (wake-up alarms still vibrate, firmly). The same message also goes to your paired Telegram and the Jarvis chat.
  */
 object Alerts {
@@ -268,15 +268,6 @@ object Alerts {
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO, 26 /* BLE headset */
         )
         return am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in types }
-    }
-
-    /** Speaks even when Jarvis was not running: wakes the core service first, then talks. */
-    suspend fun speakForced(ctx: Context, text: String) {
-        if (Engine.speaker == null) {
-            try { ContextCompat.startForegroundService(ctx, Intent(ctx, CoreService::class.java)) } catch (e: Exception) { /* not allowed right now */ }
-            repeat(12) { if (Engine.speaker == null) delay(300) }
-        }
-        Engine.speaker?.invoke(text)
     }
 
     suspend fun deliver(ctx: Context, d: Due, late: Boolean) {
@@ -317,9 +308,6 @@ object Alerts {
                 vib.vibrate(VibrationEffect.createWaveform(pattern, -1))
             } catch (e: Exception) { /* no vibrator */ }
         }
-
-        val spoken = if (wake) "Time to wake up. ${d.text}" else text
-        if (Prefs(ctx).forceVoice) speakForced(ctx, spoken) else if (headset(ctx)) Engine.speaker?.invoke(spoken)
 
         ChatBus.publish("jarvis", "Reminder: $text")
         withContext(Dispatchers.IO) {

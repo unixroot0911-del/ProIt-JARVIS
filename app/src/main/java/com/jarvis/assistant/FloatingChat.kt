@@ -27,8 +27,7 @@ import kotlin.math.abs
 /** A small chat window that floats over any app. Opened by tapping the floating orb. */
 class FloatingChat(
     private val ctx: Context,
-    private val assistant: Assistant,
-    private val voice: Voice
+    private val assistant: Assistant
 ) {
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val ui = Handler(Looper.getMainLooper())
@@ -37,22 +36,8 @@ class FloatingChat(
     private var list: LinearLayout? = null
     private var scroll: ScrollView? = null
     private var input: EditText? = null
-    private var micChip: TextView? = null
-    private var modeChipView: TextView? = null
-    private val modeSub: () -> Unit = {
-        Handler(Looper.getMainLooper()).post {
-            modeChipView?.text = Modes.label(Modes.current(ctx))
-            val l = list
-            if (l != null) {
-                l.removeAllViews(); typing = null
-                for (t in assistant.recentChat(10)) add(t.role, t.text)
-            }
-        }
-    }
     private var typing: View? = null
-    private var busy = false          // microphone only
     private var inflight = 0           // messages being answered right now; typing is never blocked
-    private var listening = false
 
     private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
     private val cyan = Color.parseColor("#2AA8FF")
@@ -115,16 +100,7 @@ class FloatingChat(
             letterSpacing = 0.3f
             setPadding(dp(6), dp(6), dp(6), dp(6))
         }
-        val mic = chip("MIC") { micTapped() }
-        micChip = mic
         header.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-        val modeChip = chip(Modes.label(Modes.current(ctx))) {
-            val next = Modes.all[(Modes.all.indexOf(Modes.current(ctx)) + 1) % Modes.all.size]
-            Modes.set(ctx, next)
-        }
-        modeChipView = modeChip
-        header.addView(modeChip)
-        header.addView(mic)
         header.addView(chip("APP") {
             ctx.startActivity(Intent(ctx, ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             hide()
@@ -195,17 +171,15 @@ class FloatingChat(
         root = panel
         lp = params
         for (t in assistant.recentChat(10)) add(t.role, t.text)
-        Modes.listeners.add(modeSub)
         ChatBus.listeners.add(sub)
     }
 
     fun hide() {
         ChatBus.listeners.remove(sub)
-        Modes.listeners.remove(modeSub)
         root?.let {
             try { wm.removeView(it) } catch (e: Exception) { /* already gone */ }
         }
-        root = null; lp = null; list = null; scroll = null; input = null; micChip = null; typing = null
+        root = null; lp = null; list = null; scroll = null; input = null; typing = null
     }
 
     private fun setWindowFocusable(on: Boolean) {
@@ -247,10 +221,10 @@ class FloatingChat(
         if (t.isEmpty()) return
         f.setText("")
         releaseKeyboard()
-        submit(t, speak = false)
+        submit(t)
     }
 
-    private fun submit(text: String, speak: Boolean) {
+    private fun submit(text: String) {
         inflight++
         showTyping()
         Engine.scope.launch(Dispatchers.Main) {
@@ -261,34 +235,6 @@ class FloatingChat(
             }
             inflight--
             if (inflight <= 0) { inflight = 0; hideTyping() }
-            if (speak && !r.failed && !Voice.forced(ctx)) voice.speak(r.spoken)
-        }
-    }
-
-    private fun micTapped() {
-        if (listening) { voice.finishRecording(); return }
-        if (busy) return
-        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            add("system", "Open Jarvis once and allow the microphone.")
-            return
-        }
-        busy = true
-        listening = true
-        micChip?.text = "DONE"
-        Engine.scope.launch(Dispatchers.Main) {
-            try {
-                val t = assistant.hear(voice)
-                listening = false
-                busy = false
-                micChip?.text = "MIC"
-                if (t == null) add("system", "I did not hear anything. If this repeats, open Jarvis once so the mic service restarts.")
-                else submit(t, speak = true)
-            } catch (e: Exception) {
-                listening = false
-                busy = false
-                micChip?.text = "MIC"
-                add("system", e.message ?: "Microphone error.")
-            }
         }
     }
 }

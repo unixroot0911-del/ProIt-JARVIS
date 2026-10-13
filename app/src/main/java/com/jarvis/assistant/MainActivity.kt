@@ -33,14 +33,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: Prefs
     private lateinit var assistant: Assistant
-    private lateinit var voice: Voice
 
     private lateinit var orb: OrbView
     private lateinit var status: TextView
     private lateinit var transcript: TextView
     private lateinit var input: EditText
 
-    private var busy = false          // voice pipeline only
     private var inflight = 0           // typing is never blocked while Jarvis works
     private var pendingImage: String? = null
     private val photoFile: File by lazy { File(cacheDir, "images").apply { mkdirs() }.let { File(it, "shot.jpg") } }
@@ -53,18 +51,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         assistant = Assistant(this)
-        voice = Voice(this, prefs)
 
         buildUi()
         requestPermissionsIfNeeded()
         ContextCompat.startForegroundService(this, Intent(this, CoreService::class.java))
         Briefings.schedule(this)
-        if (intent?.getBooleanExtra(EXTRA_LISTEN, false) == true) startListening()
+        if (intent?.getBooleanExtra(EXTRA_LISTEN, false) == true) startActivity(Intent(this, ChatActivity::class.java))
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_LISTEN, false)) startListening()
+        if (intent.getBooleanExtra(EXTRA_LISTEN, false)) startActivity(Intent(this, ChatActivity::class.java))
     }
 
     override fun onResume() {
@@ -119,28 +116,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(btn("TALK", true) { startListening() }, LinearLayout.LayoutParams(0, 150, 1f))
-        row.addView(btn("CHAT", true) { startActivity(Intent(this, ChatActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
+        row.addView(btn("CHAT", true) { startActivity(Intent(this, ChatActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f))
         row.addView(btn("LOOK", true) { takeShot() }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
-
-        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row2.addView(btn("STOP AGENT", false) {
-            transcript.text = Player.stopAll(false)
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        row2.addView(btn("WATCH", false) {
-            transcript.text = if (Watcher.active) Watcher.stop()
-            else Watcher.start(this, assistant.brain, "Coach me: comment only when you notice something genuinely useful")
-        }, LinearLayout.LayoutParams(0, -2, 1f))
-        row2.addView(btn("SETTINGS", false) {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(btn("SETTINGS", false) { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
 
         column.addView(status, LinearLayout.LayoutParams(-1, -2))
         column.addView(orb, LinearLayout.LayoutParams(-1, 0, 1f))
         column.addView(transcript, LinearLayout.LayoutParams(-1, -2))
         column.addView(input, LinearLayout.LayoutParams(-1, -2))
         column.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 16 })
-        column.addView(row2, LinearLayout.LayoutParams(-1, -2))
         column.addView(btn("MY APPS AND GAMES", false) { showCreations() }, LinearLayout.LayoutParams(-1, -2))
         root.addView(column, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
@@ -156,8 +140,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestPermissionsIfNeeded() {
         val needed = ArrayList<String>()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
-            needed.add(Manifest.permission.RECORD_AUDIO)
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             needed.add(Manifest.permission.POST_NOTIFICATIONS)
@@ -178,52 +160,7 @@ class MainActivity : AppCompatActivity() {
         process(t)
     }
 
-    private var listening = false
-
-    private fun startListening() {
-        if (listening) { voice.finishRecording(); return }   // tapping TALK again ends the recording
-        if (busy) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            transcript.text = "Allow the microphone, then tap TALK again."
-            requestPermissionsIfNeeded()
-            return
-        }
-        busy = true
-        listening = true
-        setState(OrbState.LISTENING, "LISTENING  (tap TALK to finish)")
-        lifecycleScope.launch {
-            try {
-                val wav = voice.record()
-                listening = false
-                if (wav == null) {
-                    Engine.converse = false
-                    transcript.text = "I did not hear anything."
-                    busy = false
-                    setState(OrbState.IDLE, "ONLINE")
-                    return@launch
-                }
-                setState(OrbState.THINKING, "TRANSCRIBING")
-                val text = assistant.brain.transcribe(wav)
-                if (text.isBlank()) {
-                    Engine.converse = false
-                    transcript.text = "I did not catch that."
-                    busy = false
-                    setState(OrbState.IDLE, "ONLINE")
-                    return@launch
-                }
-                transcript.text = text
-                process(text)
-            } catch (e: Exception) {
-                listening = false
-                busy = false
-                transcript.text = e.message ?: "Microphone error."
-                setState(OrbState.IDLE, "ONLINE")
-            }
-        }
-    }
-
     private fun takeShot() {
-        if (busy) return
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.files", photoFile)
             takePhoto.launch(uri)
@@ -254,8 +191,8 @@ class MainActivity : AppCompatActivity() {
                 transcript.text = "Could not read the photo."
             } else {
                 pendingImage = b64
-                transcript.text = "Photo ready. Ask your question."
-                startListening()
+                transcript.text = "Photo ready. Type your question."
+                input.requestFocus()
             }
         }
     }
@@ -272,25 +209,11 @@ class MainActivity : AppCompatActivity() {
                 onProgress = { msg -> runOnUiThread { transcript.text = msg } }
             )
             transcript.text = r.shown
-            if (!r.failed) {
-                setState(OrbState.SPEAKING, "SPEAKING")
-                if (!Voice.forced(this@MainActivity)) voice.speak(r.spoken)
-                if (Engine.converse) voice.awaitSpeech()
-            } else {
-                Engine.converse = false
-            }
             inflight--
             if (inflight <= 0) {
                 inflight = 0
-                busy = false
                 setState(OrbState.IDLE, "ONLINE")
             }
-            if (Engine.converse && inflight == 0) startListening()
         }
-    }
-
-    override fun onDestroy() {
-        voice.shutdown()
-        super.onDestroy()
     }
 }

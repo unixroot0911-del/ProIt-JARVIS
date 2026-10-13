@@ -78,16 +78,6 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         return out
     }
 
-    /** Short digest of what was said in the OTHER modes, so nothing is forgotten when the mode changes. */
-    fun otherModesDigest(n: Int): String {
-        val sb = StringBuilder()
-        readableDatabase.rawQuery("SELECT mode, role, text FROM turns WHERE mode != ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), n.toString())).use {
-            val rows = ArrayList<String>()
-            while (it.moveToNext()) rows.add("[" + it.getString(0) + "] " + (if (it.getString(1) == "user") "user" else "me") + ": " + it.getString(2).replace("\n", " ").take(160))
-            rows.reversed().forEach { r -> sb.append(r).append('\n') }
-        }
-        return sb.toString().trim()
-    }
 
     private fun addMode(db: SQLiteDatabase) {
         for (t in listOf("chat", "turns")) {
@@ -95,7 +85,7 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         }
     }
 
-    private fun mode(): String = Modes.current(app)
+    private fun mode(): String = "normal"
 
     private fun createV2(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS notifs (id INTEGER PRIMARY KEY AUTOINCREMENT, pkg TEXT, app TEXT, title TEXT, text TEXT, ts INTEGER)")

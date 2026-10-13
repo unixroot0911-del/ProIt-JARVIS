@@ -226,7 +226,7 @@ class Device(private val ctx: Context) {
         return n
     }
 
-    /** Sends a WhatsApp message: opens the chat with the text filled in, then taps Send if the screen agent is enabled. */
+    /** Sends a WhatsApp message: opens the chat with the text filled in. */
     fun whatsapp(contactName: String, text: String): String {
         if (text.isBlank()) return "I need the message text."
         val (display, raw) = contact(contactName)
@@ -242,16 +242,7 @@ class Device(private val ctx: Context) {
         }
         if (!opened) return "WhatsApp is not installed on this phone."
 
-        val svc = JarvisAccessibilityService.instance
-            ?: return "Opened WhatsApp for $display with the message ready. Press send (enable the screen agent in Settings to send automatically)."
-        Thread.sleep(2800)
-        val clicked = svc.clickSend(
-            listOf("com.whatsapp:id/send", "com.whatsapp.w4b:id/send"),
-            listOf("send", "إرسال", "envoyer", "enviar"),
-            9000
-        )
-        return if (clicked) "WhatsApp message sent to $display."
-        else "Opened WhatsApp for $display with the message ready, but I could not find the Send button. Press send."
+        return "Opened WhatsApp for $display with the message ready. Press send."
     }
 
     // ---- calendar ----

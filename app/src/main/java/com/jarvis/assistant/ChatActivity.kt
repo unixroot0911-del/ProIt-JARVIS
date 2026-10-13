@@ -1,7 +1,5 @@
 package com.jarvis.assistant
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
@@ -13,49 +11,23 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
-/** The real chat: persistent conversation with Jarvis, typed or spoken. Same brain and actions as everywhere else. */
+/** The real chat: persistent text conversation with Jarvis. Same brain and actions as everywhere else. */
 class ChatActivity : AppCompatActivity() {
 
     private lateinit var prefs: Prefs
     private lateinit var memory: Memory
     private lateinit var assistant: Assistant
-    private lateinit var voice: Voice
 
     private lateinit var list: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
-    private lateinit var mic: Button
 
-    private var busy = false          // microphone only
     private var inflight = 0           // typing is never blocked while Jarvis works
-    private var listening = false
     private var typing: View? = null
     private val maxBubble by lazy { (resources.displayMetrics.widthPixels * 0.78f).toInt() }
-
-    private lateinit var modeRow: LinearLayout
-    private val modeSub: () -> Unit = { runOnUiThread { refreshModeUi(); reloadChat() } }
-
-    private fun reloadChat() {
-        list.removeAllViews()
-        typing = null
-        for (t in memory.recentChat(80)) add(t.role, t.text)
-    }
-
-    private fun refreshModeUi() {
-        val cur = Modes.current(this)
-        for (i in 0 until modeRow.childCount) {
-            val tv = modeRow.getChildAt(i) as TextView
-            val on = Modes.all[i] == cur
-            tv.setTextColor(if (on) Color.parseColor("#05080F") else Color.parseColor("#2AA8FF"))
-            tv.setBackgroundColor(if (on) Color.parseColor("#2AA8FF") else Color.parseColor("#0E1A2B"))
-        }
-        input.hint = Modes.hint(cur)
-    }
 
     private val sub: (String, String) -> Unit = { role, text ->
         runOnUiThread {
@@ -69,22 +41,20 @@ class ChatActivity : AppCompatActivity() {
         prefs = Prefs(this)
         memory = Memory.get(this)
         assistant = Assistant(this)
-        voice = Voice(this, prefs)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         buildUi()
     }
 
     override fun onStart() {
         super.onStart()
-        reloadChat()
-        refreshModeUi()
-        Modes.listeners.add(modeSub)
+        list.removeAllViews()
+        typing = null
+        for (t in memory.recentChat(80)) add(t.role, t.text)
         ChatBus.listeners.add(sub)
     }
 
     override fun onStop() {
         ChatBus.listeners.remove(sub)
-        Modes.listeners.remove(modeSub)
         super.onStop()
     }
 
@@ -96,11 +66,6 @@ class ChatActivity : AppCompatActivity() {
     override fun onPause() {
         if (Engine.foreground === this) Engine.foreground = null
         super.onPause()
-    }
-
-    override fun onDestroy() {
-        voice.shutdown()
-        super.onDestroy()
     }
 
     private fun buildUi() {
@@ -141,10 +106,6 @@ class ChatActivity : AppCompatActivity() {
             setSingleLine(true)
             setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { sendTyped(); true } else false }
         }
-        mic = Button(this).apply {
-            text = "MIC"
-            setOnClickListener { micTapped() }
-        }
         val send = Button(this).apply {
             text = "SEND"
             setOnClickListener { sendTyped() }
@@ -155,22 +116,9 @@ class ChatActivity : AppCompatActivity() {
             setPadding(16, 8, 16, 24)
         }
         inputRow.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
-        inputRow.addView(mic, LinearLayout.LayoutParams(-2, -2))
         inputRow.addView(send, LinearLayout.LayoutParams(-2, -2))
 
-        modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(16, 0, 16, 8) }
-        for (k in Modes.all) {
-            val tv = TextView(this).apply {
-                text = Modes.label(k)
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setPadding(0, 16, 0, 16)
-                setOnClickListener { Modes.set(this@ChatActivity, k) }
-            }
-            modeRow.addView(tv, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 4, 0) })
-        }
         root.addView(bar, LinearLayout.LayoutParams(-1, -2))
-        root.addView(modeRow, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(inputRow, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
@@ -198,49 +146,18 @@ class ChatActivity : AppCompatActivity() {
         val t = input.text.toString().trim()
         if (t.isEmpty()) return
         input.setText("")
-        submit(t, speak = false)
+        submit(t)
     }
 
-    private fun submit(text: String, speak: Boolean) {
+    private fun submit(text: String) {
         inflight++
         showTyping()
         lifecycleScope.launch {
-            val r = try {
+            try {
                 assistant.handle(text, null, { Confirmer.ask(this@ChatActivity, it) }, { _ -> })
-            } catch (e: Exception) {
-                Reply(e.message ?: "Error", e.message ?: "Error", failed = true)
-            }
+            } catch (e: Exception) { /* the error is already shown in the chat */ }
             inflight--
             if (inflight <= 0) { inflight = 0; hideTyping() }
-            if (speak && !r.failed && !Voice.forced(this@ChatActivity)) voice.speak(r.spoken)
-        }
-    }
-
-    private fun micTapped() {
-        if (listening) { voice.finishRecording(); return }
-        if (busy) return
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            add("system", "Allow the microphone, then tap MIC again.")
-            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 3)
-            return
-        }
-        busy = true
-        listening = true
-        mic.text = "DONE"
-        add("system", "Listening... tap DONE when finished")
-        lifecycleScope.launch {
-            try {
-                val t = assistant.hear(voice)
-                listening = false
-                busy = false
-                mic.text = "MIC"
-                if (t == null) add("system", "I did not hear anything.") else submit(t, speak = true)
-            } catch (e: Exception) {
-                listening = false
-                busy = false
-                mic.text = "MIC"
-                add("system", e.message ?: "Microphone error.")
-            }
         }
     }
 }

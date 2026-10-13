@@ -37,11 +37,7 @@ class Assistant(context: Context) {
             mentions.forEach { names.add(Dossier.canon(appContext, it)) }
             for (n in memory.dossierNames()) if (n.length >= 3 && low.contains(n)) names.add(n)
             names.add("user")
-            var s = Dossier.text(appContext, names)
-            if (Modes.current(appContext) == "gaming") {
-                val top = memory.topPlayed(6)
-                if (top.isNotEmpty()) s += (if (s.isEmpty()) "" else "\n") + "Games played most: " + top.joinToString(", ")
-            }
+            val s = Dossier.text(appContext, names)
             if (s.isBlank()) "" else "SECTIONED MEMORY (what I know about what the user mentions; obey the standing orders):\n" + s + "\n"
         } catch (e: Exception) { "" }
     }
@@ -50,18 +46,10 @@ class Assistant(context: Context) {
 
     fun recentChat(n: Int): List<Turn> = memory.recentChat(n)
 
-    /** Records one utterance and returns its text, or null if nobody spoke. Throws a readable error on failure. */
-    suspend fun hear(voice: Voice): String? {
-        val wav = voice.record() ?: return null
-        val t = brain.transcribe(wav).trim()
-        return t.ifEmpty { null }
-    }
-
     fun buildContext(detailed: Boolean = false): String {
         val sb = StringBuilder()
         sb.append("Now: ").append(SimpleDateFormat("EEEE yyyy-MM-dd HH:mm", Locale.ENGLISH).format(Date())).append('\n')
         sb.append("Battery: ").append(device.batteryLine()).append('\n')
-        if (Watcher.active) sb.append("Watch mode: ON, watching the screen for: ").append(Watcher.topic).append('\n')
         sb.append("Pending reminders and alarms: ").append(Scheduler.summary(appContext)).append('\n')
         Creations.names(appContext).take(8).let { if (it.isNotEmpty()) sb.append("Apps and games built so far: ").append(it.joinToString(", ")).append('\n') }
         sb.append("Calendar today: ").append(device.calendarToday()).append('\n')
@@ -128,7 +116,6 @@ class Assistant(context: Context) {
             Reply(msg, msg, failed = true)
         }
         logChat("jarvis", r.shown)
-        if (prefs.forceVoice) Engine.speaker?.invoke(r.spoken)
         return r
     }
 
@@ -140,7 +127,7 @@ class Assistant(context: Context) {
     ): Reply {
         // 1. Instant commands: no internet, no AI quota.
         if (imageB64 == null) {
-            val off = if (Modes.current(appContext) == "ai") Offline.parseControl(text) else Offline.parse(text, actions)
+            val off = Offline.parse(text, actions)
             if (off != null) {
                 val type = off.actionType
                 val status = if (type != null) execute(type, off.actionArg ?: "", confirm, onProgress) else null
@@ -154,8 +141,7 @@ class Assistant(context: Context) {
         val ctx = withContext(Dispatchers.IO) {
             buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
                 (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "") +
-                memoryBlock(text, mentions) +
-                (if (Modes.current(appContext) == "gaming") "Installed games: " + Modes.installedGames(appContext).joinToString(", ").ifBlank { "none detected" } + "\n" else "")
+                memoryBlock(text, mentions)
         }
         var d = brain.think(text, ctx, imageB64)
         val question = d.reply.trim().let { it.endsWith("?") || it.endsWith("؟") }
@@ -211,20 +197,7 @@ class Assistant(context: Context) {
             return withContext(Dispatchers.IO) { Deleter.perform(appContext, x) }
         }
         if (!confirm("Confirm: $type\n$arg")) return "Cancelled."
-        return startAgent(
-            "The user approved this request: $type $arg. Carry it out in the right app. " +
-                "Before the final tap that spends money or deletes something you will be asked again.",
-            confirm, onProgress
-        )
-    }
-
-    private suspend fun screenshotToTelegram(): String {
-        val svc = JarvisAccessibilityService.instance ?: return "That needs the Jarvis screen agent: Settings > 2. Accessibility."
-        val bmp = svc.screenshot() ?: return "The screenshot was blocked (protected screen, locked phone, or Android 10 or older)."
-        val out = java.io.ByteArrayOutputStream()
-        bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
-        val sent = withContext(Dispatchers.IO) { Telegram.sendPhotoToOwner(prefs, out.toByteArray(), "Your screen right now") }
-        return if (sent) "Screenshot sent to your Telegram." else "I took the screenshot but Telegram is not paired yet."
+        return "I no longer operate other apps, so I cannot complete \"$type\" for you. Do the final step yourself in the app."
     }
 
     private val refusal = Regex(
@@ -232,26 +205,6 @@ class Assistant(context: Context) {
             "|لا أستطيع|لا استطيع|لا يمكنني|ما نقدرش|ما كنقدرش|ماقدرش",
         RegexOption.IGNORE_CASE
     )
-
-    /** Games and "play X" belong to the player (sees the screen, remembers games, holds fingers), not the text-only agent. */
-    private fun redirectPlay(goal: String): String? {
-        val g = goal.trim()
-        if (g.startsWith("play:")) return Player.startAI(appContext, brain, g.removePrefix("play:"))
-        if (!Player.looksLikePlay(appContext, g)) return null
-        val app = try { actions.mentions(g).firstOrNull() ?: "" } catch (e: Exception) { "" }
-        return Player.startAI(appContext, brain, app + "|" + g + "|")
-    }
-
-    private fun startAgent(goal: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
-        if (Engine.agentJob?.isActive == true) return "An agent task is already running. Say 'stop agent' first."
-        Engine.lastGoal = goal
-        val agent = ScreenAgent(appContext, brain)
-        Engine.agentJob = Engine.scope.launch {
-            val r = agent.run(goal, onProgress, confirm)
-            onProgress("AGENT: $r")
-        }
-        return "Agent started."
-    }
 
     /** Sends a message in any app: WhatsApp and SMS directly, every other app through the screen agent. */
     private suspend fun sendMessage(
@@ -273,10 +226,7 @@ class Assistant(context: Context) {
                 withContext(Dispatchers.IO) { device.whatsapp(who, msg) }
             a.isEmpty() || a.contains("sms") || a == "message" || a == "messages" || a == "text" || a == "رسالة" ->
                 withContext(Dispatchers.IO) { device.sendSms("$who|$msg") }
-            else -> startAgent(
-                "Open the $app app, find the chat or conversation with \"$who\", type this exact message: \"$msg\" and send it. " +
-                    "Then report that it was sent.", confirm, onProgress
-            )
+            else -> "I can send WhatsApp messages and SMS. I no longer operate other apps like $app, so send that one yourself."
         }
     }
 
@@ -295,8 +245,6 @@ class Assistant(context: Context) {
                     sendMessage(if (arg.count { it == '|' } >= 2) arg else "whatsapp|$arg", confirm, onProgress)
                 t == "send_sms" -> withContext(Dispatchers.IO) { device.sendSms(arg) }
                 t in Device.TYPES -> withContext(Dispatchers.IO) { device.run(t, arg) }
-                t == "stop_agent" || t == "stop_play" || t == "stop_macro" -> Player.stopAll(arg.trim().lowercase() == "all")
-                t == "play" || t == "play_game" || t == "automate" -> Player.startAI(appContext, brain, arg)
                 t == "remember" -> {
                     val p = arg.split("|", limit = 4).map { it.trim() }
                     if (p.size < 4 || p[1].isEmpty() || p[3].isEmpty()) "To file that I need kind|name|key|value."
@@ -308,11 +256,6 @@ class Assistant(context: Context) {
                 }
                 t == "memory_show" -> Dossier.overview(appContext, arg)
                 t == "last_error" -> Diag.report(appContext)
-                t == "play_memory" -> Player.memoryReport(appContext, arg)
-                t == "play_forget" -> Player.forget(appContext, arg)
-                t == "macro_create" -> Macros.create(appContext, brain, arg)
-                t == "macro_run" -> Player.startMacro(appContext, arg)
-                t == "macro_list" -> Macros.list(appContext)
                 t == "reply_notification" -> {
                     val p = arg.split("|", limit = 3)
                     withContext(Dispatchers.Default) { Replier.reply(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" }, p.getOrElse(2) { "" }) }
@@ -332,31 +275,15 @@ class Assistant(context: Context) {
                     withContext(Dispatchers.IO) { memory.addNote(p.getOrElse(0) { "note" }, p.getOrElse(1) { p[0] }) }
                     "Saved to your study notes."
                 }
-                t == "set_mode" -> Modes.set(appContext, arg)
-                t == "run_agent" -> redirectPlay(arg) ?: startAgent(arg, confirm, onProgress)
-                t == "set_voice" -> when (arg.trim().lowercase()) {
-                    "force", "force_on" -> { prefs.forceVoice = true; prefs.speakReplies = true; "Forced voice ON: I speak everything aloud, always." }
-                    "force_off" -> { prefs.forceVoice = false; "Forced voice off." }
-                    "off" -> { prefs.speakReplies = false; prefs.forceVoice = false; "Voice off. I will only write." }
-                    else -> { prefs.speakReplies = true; "Voice on." }
-                }
                 t == "download" -> Downloader.fetch(appContext, brain, arg, onProgress)
                 t == "update_self" -> Updater.check(appContext, true)
                 t == "check_update" -> Updater.check(appContext, false)
                 t == "self_check" -> Health.report(appContext)
                 t == "alert_on" || t == "alert_off" || t == "alert_list" -> Monitor.run(appContext, t, arg)
-                t == "screenshot" -> screenshotToTelegram()
-                t == "watch_start" -> Watcher.start(appContext, brain, arg)
-                t == "watch_stop" -> Watcher.stop()
-                t == "look_screen" -> Watcher.see(appContext, brain, arg)
                 t == "web_answer" -> brain.search(arg)
                 t in Scheduler_TYPES -> Scheduler.run(appContext, t, arg)
                 t == "build_app" -> Creations.build(appContext, brain, arg, onProgress)
                 t == "open_creation" -> Creations.openByName(appContext, arg)
-                t == "converse" -> {
-                    Engine.converse = arg.trim().lowercase() !in listOf("off", "false", "no", "stop")
-                    if (Engine.converse) "Conversation mode on. Just keep talking; say 'stop' to end it." else "Conversation mode off."
-                }
                 else -> actions.run(type, arg)
             }
         } catch (e: Exception) {

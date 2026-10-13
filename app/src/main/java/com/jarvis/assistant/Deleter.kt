@@ -40,10 +40,6 @@ object Deleter {
             out.add(Target("creation", "\"${it.nameWithoutExtension}\"", "An app or game that Jarvis built for you. It will be removed from MY APPS AND GAMES.", file = it))
         }
 
-        Macros.find(ctx, q)?.let {
-            out.add(Target("file", "the macro \"${it.nameWithoutExtension}\"", "A saved automation routine.", file = it))
-        }
-
         // 2. an exact path
         if (q.startsWith("/")) {
             val f = File(q)
