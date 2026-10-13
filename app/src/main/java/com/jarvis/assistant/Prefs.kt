@@ -71,6 +71,11 @@ class Prefs(context: Context) {
         get() = sp.getInt("watch_s", 10)
         set(v) = sp.edit().putInt("watch_s", v).apply()
 
+    /** Jarvis may ask a clarifying question (with answer buttons) when something is really unclear. */
+    var smartAsk: Boolean
+        get() = sp.getBoolean("smart_ask", true)
+        set(v) = sp.edit().putBoolean("smart_ask", v).apply()
+
     var watchMinutes: Int
         get() = sp.getInt("watch_m", 90)
         set(v) = sp.edit().putInt("watch_m", v).apply()

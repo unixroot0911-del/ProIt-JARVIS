@@ -50,6 +50,7 @@ class SettingsActivity : AppCompatActivity() {
         val gemini = field(prefs.geminiKey, "Gemini API key (free: aistudio.google.com)", true)
         val groq = field(prefs.groqKey, "Groq API key (free: console.groq.com)", true)
         val study = switch("Study mode (tutor + quizzes)", prefs.mode == "study")
+        val smartAsk = switch("Smart questions: Jarvis asks me (with answer buttons) when something is really unclear", prefs.smartAsk)
         val briefings = switch("Morning and evening briefings", prefs.briefingsOn)
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
@@ -64,6 +65,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.geminiKey = gemini.text.toString()
             prefs.groqKey = groq.text.toString()
             prefs.mode = if (study.isChecked) "study" else "normal"
+            prefs.smartAsk = smartAsk.isChecked
             prefs.briefingsOn = briefings.isChecked
             prefs.morningTime = morning.text.toString().ifBlank { "07:30" }
             prefs.eveningTime = evening.text.toString().ifBlank { "21:00" }
@@ -83,6 +85,7 @@ class SettingsActivity : AppCompatActivity() {
             addView(label("BRAIN 1: GEMINI")); addView(gemini)
             addView(label("BRAIN 2: GROQ (automatic fallback)")); addView(groq)
             addView(label("STUDY")); addView(study)
+            addView(label("UNDERSTANDING")); addView(smartAsk)
             addView(label("BRIEFINGS")); addView(briefings); addView(morning); addView(evening)
             addView(label("FLOATING ORB")); addView(overlay)
             addView(button("Allow display over other apps") {

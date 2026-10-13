@@ -128,7 +128,7 @@ object Scheduler {
         }
         withContext(Dispatchers.IO) { note("Running your scheduled task: ${d.text}") }
         val r = try {
-            Assistant(ctx).handle(d.text, null, { q -> Confirmer.ask(ctx, q) }, { m -> if (m.startsWith("AGENT:")) note(m) })
+            Assistant(ctx).handle(d.text, null, { q -> Confirmer.ask(ctx, q) }, { m -> if (m.startsWith("AGENT:")) note(m) }, interactive = false)
         } catch (e: Exception) { Reply("Task failed: ${e.message}", "Task failed: ${e.message}", true) }
         withContext(Dispatchers.IO) { note(r.shown.ifBlank { r.spoken }) }
     }

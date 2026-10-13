@@ -24,13 +24,13 @@ object Offline {
     private val volUp = rx("^((ارفع|زيد|علي|علّي|raise|increase|turn up).{0,12}(الصوت|volume)|volume up|الصوت (فوق|اعلى|أعلى))$")
     private val volDown = rx("^((اخفض|نقص|وطي|وطّي|lower|decrease|turn down).{0,12}(الصوت|volume)|volume down|الصوت (تحت|اقل|أقل))$")
     private val mute = rx("^(كتم|اكتم|اكتم الصوت|mute|silence)$")
-    private val pause = rx("^(pause|pause music|stop music|وقف|وقف الموسيقى|وقف المزيكا|توقف|أوقف الموسيقى)$")
-    private val play = rx("^(play|resume|play music|كمل|شغل الموسيقى|شغل المزيكا)$")
+    private val pause = rx("^(pause|pause music|stop music|وقف الموسيقى|وقف المزيكا|أوقف الموسيقى)$")
+    private val play = rx("^(resume music|play music|resume|شغل الموسيقى|شغل المزيكا)$")
     private val next = rx("^(next|skip|next song|التالي|الموالية|الأغنية الموالية|الاغنية الموالية)$")
     private val prev = rx("^(previous|previous song|السابق|الأغنية السابقة|الاغنية السابقة)$")
     private val timer = rx("^(?:set (?:a )?)?(?:timer|مؤقت|تايمر)(?: for| ل| ديال)? ?(\\d{1,4}) ?(seconds?|secs?|ثانية|ثواني|ثانيه|minutes?|mins?|دقيقة|دقائق|دقايق|دقيقه|hours?|ساعة|ساعات|ساعه)$")
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
-    private val open = rx("^(?:open|launch|start|play|run|go to|let'?s(?: play| open| start| go| run| go to)?|lets(?: play| open| start| go)?|افتح|حل|شغل|العب|يلا|هيا|خلينا|نلعبو|لنلعب|ندير)\\s+(.{2,25})$")
+    private val open = rx("^(?:open|launch|go to|افتح|فتح|حل)\s+(.{2,25})$")
     private val lastErr = rx("^(last error|show error|show the error|what went wrong|آخر خطأ|اخر خطأ|اخر خطا|آخر خطا|شنو وقع|ما الخطأ)$")
     private val call = rx("^(?:call|اتصل ب|اتصل بـ|اتصل|عيط ل|عيط على|كلم)\\s+(.{2,25})$")
 
@@ -40,7 +40,7 @@ object Offline {
 
         if (lastErr.matches(t)) return d(t, "Here is the last error.", "هذا آخر خطأ.", "last_error", "")
 
-        if (torch.containsMatchIn(t) && t.split(" ").size <= 5) {
+        if (torch.containsMatchIn(t) && t.split(" ").size <= 3) {
             val off = torchOff.containsMatchIn(t)
             return d(t, if (off) "Flashlight off." else "Flashlight on.", if (off) "تم إطفاء الكشاف." else "تم تشغيل الكشاف.",
                 "flashlight", if (off) "off" else "on")
@@ -74,13 +74,10 @@ object Offline {
             if (h !in 0..23 || min !in 0..59) return null
             return d(t, "Alarm set.", "تم ضبط المنبه.", "set_alarm", "%02d:%02d".format(h, min))
         }
-        call.find(t)?.let { m -> return d(t, "Calling.", "جاري الاتصال.", "call_contact", m.groupValues[1].trim()) }
+        call.find(t)?.let { m -> if (m.groupValues[1].trim().split(" ").size <= 3) return d(t, "Calling.", "جاري الاتصال.", "call_contact", m.groupValues[1].trim()) }
         open.find(t)?.let { m ->
             val name = m.groupValues[1].trim()
-            if (actions.findApp(name) != null || actions.settingFor(name) != null) return d(t, "Opening $name.", "جاري فتح $name.", "open_app", name)
-        }
-        if (t.split(" ").size <= 2 && t.length >= 4 && actions.findAppLoose(t) != null) {
-            return d(t, "Opening $t.", "جاري فتح $t.", "open_app", t)
+            if (name.split(" ").size <= 3 && (actions.findApp(name) != null || actions.settingFor(name) != null)) return d(t, "Opening $name.", "جاري فتح $name.", "open_app", name)
         }
         return null
     }

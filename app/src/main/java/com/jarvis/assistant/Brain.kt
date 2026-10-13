@@ -24,7 +24,11 @@ data class Decision(
     val remember: String? = null,
     /** True when the brain could not be reached, so [reply] is an error message, not an answer. */
     val failed: Boolean = false,
-    val speakResult: Boolean = false
+    val speakResult: Boolean = false,
+    /** A clarifying question the brain wants answered before it acts. */
+    val ask: AskSpec? = null,
+    val understood: String = "",
+    val confidence: Double = 1.0
 )
 
 class HttpError(val code: Int, val body: String) : RuntimeException(describe(code, body)) {
@@ -77,6 +81,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     private val jsonRules = """
 
         Respond ONLY with one JSON object, no markdown, no text outside it, with these keys:
+          "understood": string, one line: what the user wants, with the exact objects (who, what, when, where, how much), in your own words.
+          "confidence": number 0 to 1: how sure you are that you understood exactly what they want.
+          "ask": null or {"q": string, "options": [2 to 4 short likely answers], "why": short reason}: ONLY under the rules of UNDERSTANDING below.
           "reply": string, what you say to the user.
           "action": null or {"type": string, "arg": string}. Supported types:
               "send_message" (arg = "app|contact or number|message text"; app is whatsapp, sms, telegram, instagram... any app),
@@ -141,12 +148,18 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         open_app with that word opens its system settings screen, where the user flips the switch.
         Downloads use only free, legal sources. If the user asks for paid or cracked content, say so in one line and download the free demo, trial
         or legal free alternative instead.
-        UNDERSTANDING: interpret by INTENT, never by the literal words and never only by the examples you have seen. The user types fast, with typos, slang,
-        Arabic, Darija, French and English mixed, and spells names by sound. A word that resembles an installed app (see "Installed apps" and "Apps the user's
-        words resemble" in the phone context) IS that app; one that resembles a contact IS that contact. "let's X", "X?", "lets go X", "يلا X", "play X", "I want X"
-        with an installed app or game X means open it. The same reasoning covers every family of request: apps and games, contacts, songs and artists (play_music),
-        places (navigate), websites, files, settings, reminders, notifications. Do not ask which app or what content when the phone context lets you guess: act on
-        the best guess and say in a few words what you did. Ask ONE short question only when two readings would have different irreversible effects (sending, paying, deleting).
+        FIDELITY (never distort what the user said): the text of a message to send, a note, a search, a name, a number, an amount, a time or a place is copied EXACTLY as the
+        user gave it: same language, same spelling, same emojis; never translate it, correct it, shorten it, embellish it or replace it with something that merely sounds similar.
+        Do only what was asked in the latest message, nothing more and nothing different. A word that resembles an installed app or a contact is only a hint: use it when the sentence
+        is really about opening or using that app or contact, never when it is just a word in a normal sentence. "do you know X?" is a conversation, not an order.
+        UNDERSTANDING: the user types fast, with typos, slang, Arabic, Darija, French and English mixed. Interpret by INTENT, never by literal words or by examples you have seen.
+        Before every answer, silently work out: what they want, the exact objects (who, what, when, where, how much), what is still missing, and whether the phone context, the memory,
+        the recent conversation or the standing answers already supply it. Fill every gap you can by inference first, then decide. Reason about what is likely, not just what is possible.
+        CURIOSITY: be smart, not nosy. Use "ask" ONLY when (1) a required detail is missing and cannot be inferred (who to message, what to write, when, which of two plausible apps or contacts),
+        or (2) two readings lead to different results and being wrong would cost something (sending, calling, deleting, scheduling, downloading something large), or (3) your confidence is below 0.6.
+        Never ask what the context answers, what has a safe obvious default, small talk, or something the user already told you or answered before. A "standing answer" in the memory
+        means the question is already settled: use it. Ask at most ONE question. Give 2 to 4 concrete options in the user's language (the likeliest answers first), the user can always type
+        their own, so never add an "other" option. When you ask, "action" is null and "reply" is the question in one short line. After the user answers, carry out the request at once and do not ask again.
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 
@@ -357,7 +370,17 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
                 reply = o.optString("reply", cleaned),
                 actionType = act?.optString("type")?.takeIf { it.isNotEmpty() && it != "null" },
                 actionArg = act?.optString("arg", "")?.takeIf { it != "null" } ?: if (act != null) "" else null,
-                remember = o.optString("remember", "").takeIf { it.isNotEmpty() && it != "null" }
+                remember = o.optString("remember", "").takeIf { it.isNotEmpty() && it != "null" },
+                ask = o.optJSONObject("ask")?.let { a ->
+                    val q = a.optString("q", "").trim()
+                    if (q.isEmpty() || q == "null") null else {
+                        val arr = a.optJSONArray("options")
+                        val opts = if (arr == null) emptyList() else (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() && it != "null" }.distinct().take(4)
+                        AskSpec(q, opts, a.optString("why", "").trim().takeIf { it != "null" } ?: "")
+                    }
+                },
+                understood = o.optString("understood", "").takeIf { it != "null" } ?: "",
+                confidence = o.optDouble("confidence", 1.0)
             )
         } catch (e: Exception) {
             Decision(raw.trim())

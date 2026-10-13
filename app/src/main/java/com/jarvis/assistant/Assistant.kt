@@ -90,7 +90,8 @@ class Assistant(context: Context) {
         text: String,
         imageB64: String?,
         confirm: suspend (String) -> Boolean,
-        onProgress: (String) -> Unit
+        onProgress: (String) -> Unit,
+        interactive: Boolean = true
     ): Reply {
         val low = text.trim().lowercase()
         if (low.startsWith("/pair")) {
@@ -110,7 +111,7 @@ class Assistant(context: Context) {
         }
 
         val r = try {
-            handleInner(text, imageB64, confirm, progress)
+            handleInner(text, imageB64, confirm, progress, interactive)
         } catch (e: Exception) {
             val msg = e.message ?: "Something went wrong."
             Reply(msg, msg, failed = true)
@@ -119,11 +120,17 @@ class Assistant(context: Context) {
         return r
     }
 
+    private fun slug(q: String): String = q.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "_").trim('_').take(36).ifBlank { "answer" }
+
+    private fun askText(a: AskSpec): String =
+        a.q + (if (a.options.isEmpty()) "" else "\n" + a.options.mapIndexed { i, o -> "${i + 1}. $o" }.joinToString("\n")) + "\nAnswer with a number or in your own words."
+
     private suspend fun handleInner(
         text: String,
         imageB64: String?,
         confirm: suspend (String) -> Boolean,
-        onProgress: (String) -> Unit
+        onProgress: (String) -> Unit,
+        interactive: Boolean
     ): Reply {
         // 1. Instant commands: no internet, no AI quota.
         if (imageB64 == null) {
@@ -140,20 +147,40 @@ class Assistant(context: Context) {
         val mentions = withContext(Dispatchers.IO) { actions.mentions(text) }
         val ctx = withContext(Dispatchers.IO) {
             buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
-                (if (mentions.isNotEmpty()) "Apps the user's words resemble (probably what they mean): " + mentions.joinToString(", ") + "\n" else "") +
+                (if (mentions.isNotEmpty()) "Installed apps whose names resemble words in the message (a hint only, not necessarily what they mean): " + mentions.joinToString(", ") + "\n" else "") +
+                (if (prefs.smartAsk) "" else "Smart questions are OFF: never use the ask key; decide with your best reading.\n") +
                 memoryBlock(text, mentions)
         }
         var d = brain.think(text, ctx, imageB64)
-        val question = d.reply.trim().let { it.endsWith("?") || it.endsWith("؟") }
-        if (!d.failed && d.actionType == null && (refusal.containsMatchIn(d.reply) || (question && mentions.isNotEmpty()))) {
+        if (!d.failed && d.actionType == null && refusal.containsMatchIn(d.reply) && d.ask == null) {
             // A bare "I can't" is never the final answer: make the brain find a workable route and act.
             val d2 = brain.think(
-                text + "\n\n[SYSTEM NOTE: your draft answer was a refusal or a dead end: \"" + d.reply.take(160) + "\". Do not refuse, and do not ask what you can work out yourself from the phone context (installed apps, contacts, notifications, history): decide and act. " +
-                    "Pick the closest workable route with your actions (download, web_answer, run_agent, build_app, open_url, remind...) and issue it now. " +
+                text + "\n\n[SYSTEM NOTE: your draft answer was a refusal or a dead end: \"" + d.reply.take(160) + "\". Do not refuse: find the closest workable route with your actions " +
+                    "(download, web_answer, build_app, open_url, remind...) and issue it now, using exactly what the user said. " +
                     "Decline only if it is genuinely harmful or illegal, and then offer the legal alternative and do that instead.]",
                 ctx, imageB64
             )
             if (!d2.failed && (d2.actionType != null || !refusal.containsMatchIn(d2.reply))) d = d2
+        }
+        // the brain wants to understand exactly before acting: ask on the screen (or as a text question where no screen is available)
+        val spec = d.ask
+        if (!d.failed && spec != null && prefs.smartAsk) {
+            val ans: AskAnswer? = if (interactive) Asker.ask(appContext, spec) else null
+            if (ans == null) {
+                withContext(Dispatchers.IO) { memory.addTurn("user", text); memory.addTurn("model", askText(spec)) }
+                val q = askText(spec)
+                return Reply(q, q)
+            }
+            if (ans.remember && ans.text.isNotBlank()) {
+                withContext(Dispatchers.IO) { Dossier.put(appContext, "preference", "user", slug(spec.q), "When asked \"" + spec.q.take(120) + "\" the user answered: \"" + ans.text.take(160) + "\"") }
+            }
+            val note = if (ans.text.isBlank()) "the user said: decide for me. Choose the most sensible reading yourself and act now"
+            else "the user answered: \"" + ans.text + "\". Use this answer exactly as given"
+            withContext(Dispatchers.IO) { memory.addTurn("user", text); memory.addTurn("model", spec.q); memory.addTurn("user", if (ans.text.isBlank()) "(decide for me)" else ans.text) }
+            val d3 = brain.think(text + "\n\n[CLARIFICATION: you asked \"" + spec.q.take(200) + "\"; " + note + ". Carry out the original request now; do not ask again.]", ctx, imageB64)
+            d = if (d3.failed) d3 else d3.copy(ask = null)
+        } else if (spec != null) {
+            d = d.copy(ask = null)
         }
         if (d.failed) return Reply(d.reply, d.reply, failed = true)
 
