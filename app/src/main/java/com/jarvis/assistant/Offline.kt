@@ -30,7 +30,7 @@ object Offline {
     private val prev = rx("^(previous|previous song|السابق|الأغنية السابقة|الاغنية السابقة)$")
     private val timer = rx("^(?:set (?:a )?)?(?:timer|مؤقت|تايمر)(?: for| ل| ديال)? ?(\\d{1,4}) ?(seconds?|secs?|ثانية|ثواني|ثانيه|minutes?|mins?|دقيقة|دقائق|دقايق|دقيقه|hours?|ساعة|ساعات|ساعه)$")
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
-    private val open = rx("^(?:open|launch|go to|افتح|فتح|حل)\s+(.{2,25})$")
+    private val open = rx("^(?:open|launch|go to|افتح|فتح|حل)\\s+(.{2,25})$")
     private val lastErr = rx("^(last error|show error|show the error|what went wrong|آخر خطأ|اخر خطأ|اخر خطا|آخر خطا|شنو وقع|ما الخطأ)$")
     private val call = rx("^(?:call|اتصل ب|اتصل بـ|اتصل|عيط ل|عيط على|كلم)\\s+(.{2,25})$")
 
