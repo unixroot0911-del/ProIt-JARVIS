@@ -50,11 +50,11 @@ class SettingsActivity : AppCompatActivity() {
         val gemini = field(prefs.geminiKey, "Gemini API key (free: aistudio.google.com)", true)
         val groq = field(prefs.groqKey, "Groq API key (free: console.groq.com)", true)
         val study = switch("Study mode (tutor + quizzes)", prefs.mode == "study")
-        val smartAsk = switch("Smart questions: Jarvis asks me (with answer buttons) when something is really unclear", prefs.smartAsk)
+        val smartAsk = switch("Smart questions: AXIOM asks me (with answer buttons) when something is really unclear", prefs.smartAsk)
         val briefings = switch("Morning and evening briefings", prefs.briefingsOn)
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
-        val overlay = switch("Floating Jarvis: orb + chat window over other apps", prefs.overlayOn)
+        val overlay = switch("Floating AXIOM: orb + chat window over other apps", prefs.overlayOn)
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
         statusView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f; text = Health.report(this@SettingsActivity) }
@@ -159,7 +159,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun refreshPairInfo() {
         pairInfo.text = when {
             prefs.telegramToken.isEmpty() -> "Paste the bot token, press SAVE, then send /pair CODE to your bot."
-            prefs.telegramChatId.isNotEmpty() -> "Paired. Only your chat can control Jarvis."
+            prefs.telegramChatId.isNotEmpty() -> "Paired. Only your chat can control AXIOM."
             else -> "Send this to your bot to pair:  /pair ${prefs.pairCode}"
         }
     }

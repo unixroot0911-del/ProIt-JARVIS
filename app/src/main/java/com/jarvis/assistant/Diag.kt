@@ -35,7 +35,7 @@ object Diag {
                 val txt = s.getString("last", "") ?: ""
                 s.edit().putBoolean("pending", false).apply()
                 Engine.scope.launch(Dispatchers.IO) {
-                    try { Telegram.sendToOwner(Prefs(a), "Jarvis crashed last time:\n" + txt.take(1500)) } catch (x: Exception) { /* ignore */ }
+                    try { Telegram.sendToOwner(Prefs(a), "AXIOM crashed last time:\n" + txt.take(1500)) } catch (x: Exception) { /* ignore */ }
                 }
             }
         } catch (x: Throwable) { /* ignore */ }

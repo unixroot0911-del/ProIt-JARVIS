@@ -86,7 +86,7 @@ class ChatActivity : AppCompatActivity() {
             setOnClickListener { finish() }
         }, LinearLayout.LayoutParams(120, -2))
         bar.addView(TextView(this).apply {
-            text = "JARVIS"
+            text = "AXIOM"
             setTextColor(Color.parseColor("#2AA8FF"))
             textSize = 16f
             letterSpacing = 0.3f
@@ -99,7 +99,7 @@ class ChatActivity : AppCompatActivity() {
         scroll = ScrollView(this).apply { addView(list) }
 
         input = EditText(this).apply {
-            hint = "Message Jarvis"
+            hint = "Message AXIOM"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             imeOptions = EditorInfo.IME_ACTION_SEND

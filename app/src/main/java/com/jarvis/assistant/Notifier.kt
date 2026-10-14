@@ -17,7 +17,7 @@ object Notifier {
 
     fun ensureChannel(context: Context) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Jarvis trigger", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "AXIOM", NotificationManager.IMPORTANCE_LOW))
     }
 
     fun build(context: Context): Notification {
@@ -28,8 +28,8 @@ object Notifier {
         val pi = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return Notification.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Jarvis")
-            .setContentText("Tap to talk")
+            .setContentTitle("AXIOM")
+            .setContentText("Tap to open the chat")
             .setContentIntent(pi)
             .setOngoing(true)
             .build()

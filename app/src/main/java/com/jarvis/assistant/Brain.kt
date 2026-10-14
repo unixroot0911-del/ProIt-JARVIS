@@ -31,7 +31,7 @@ data class Decision(
     val confidence: Double = 1.0
 )
 
-class HttpError(val code: Int, val body: String) : RuntimeException(describe(code, body)) {
+class HttpError(val code: Int, val body: String, val retryAfterMs: Long = 0L) : RuntimeException(describe(code, body)) {
     val retriable: Boolean get() = code == 408 || code == 429 || code in 500..504
 
     companion object {
@@ -57,9 +57,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     companion object {
         private val badUntil = ConcurrentHashMap<String, Long>()
-        private fun isBad(p: String) = (badUntil[p] ?: 0L) > System.currentTimeMillis()
-        private fun markBad(p: String) { badUntil[p] = System.currentTimeMillis() + 60_000L }
-        private fun markGood(p: String) { badUntil.remove(p) }
+        internal fun isBad(p: String) = (badUntil[p] ?: 0L) > System.currentTimeMillis()
+        internal fun markBad(p: String) { badUntil[p] = System.currentTimeMillis() + 60_000L }
+        internal fun markGood(p: String) { badUntil.remove(p) }
 
         /** Pulls the JSON object out of a reply that may contain extra words or markdown fences. */
         fun extractJson(raw: String): String {
@@ -71,7 +71,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     }
 
     private val base = """
-        You are JARVIS, the personal AI system on the user's Android phone. Personality: sharp, bold, ambitious,
+        You are AXIOM, the personal AI system on the user's Android phone. Personality: sharp, bold, ambitious,
         confident, dry wit, never servile. Do not use any title or honorific for the user (no "sir", no "boss").
         Language: reply in the language the user spoke. Understand Modern Standard Arabic, Moroccan Darija and English;
         if the user mixes them, mix naturally. Be fast and brief: usually one or two sentences, never more than
@@ -96,29 +96,29 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "reply_notification" (arg = "App|Contact|message text": answers an existing chat through its notification),
               "log_expense" (arg = "amount|category|note"), "log_habit" (arg = habit name),
               "note" (arg = "topic|what to remember or review"),
-              "last_error" (arg = "": shows the last crash or internal error Jarvis recorded),
-              "remember" (arg = "kind|name|key|value": files a fact in Jarvis' sectioned memory. kind = game, app, person, topic or preference (name "user" for preference);
+              "last_error" (arg = "": shows the last crash or internal error AXIOM recorded),
+              "remember" (arg = "kind|name|key|value": files a fact in AXIOM's sectioned memory. kind = game, app, person, topic or preference (name "user" for preference);
                   key = short snake_case label such as rule_skip_cutscenes, plays_often, loading_time, note; value = the fact in plain words.
                   Use it whenever the user states a lasting rule, habit or fact: "always skip cutscenes in X", "I play X a lot", "never open Y", "Sara is my sister". Confirm in one short line),
               "forget_about" (arg = "name" or "name|key": removes what is filed about that game, app, person or topic),
               "memory_show" (arg = "" for the whole sectioned memory, or a name for just that one),
               "schedule_task" (arg = "when|what to do|optional repeat": when = minutes from now, HH:MM or yyyy-MM-dd HH:mm; what = any text request in plain words;
-                  repeat = daily, weekly or hourly. Jarvis carries the request out at that time and reports the result),
+                  repeat = daily, weekly or hourly. AXIOM carries the request out at that time and reports the result),
               "web_answer" (arg = a question that needs fresh internet facts: news, prices, scores, weather, who holds a role now),
               "remind" (arg = "minutes from now|what to remind|repeat"; compute the minutes yourself from the current time; repeat optional: daily or weekly),
               "remind_at" (arg = "yyyy-MM-dd HH:mm|what to remind|repeat" or "HH:MM|what to remind|repeat"),
               "list_reminders" (arg = ""), "cancel_reminder" (arg = words from the reminder, or "all"),
-              "build_app" (arg = "name|full description, or the change to make": Jarvis writes a complete playable game or tool and opens it on the phone),
+              "build_app" (arg = "name|full description, or the change to make": AXIOM writes a complete playable game or tool and opens it on the phone),
               "open_creation" (arg = name of an app or game built earlier),
               "download" (arg = "what to download|optional direct link": searches the web for free, legal sources, follows download pages to the real file
                   and downloads it to the phone's Downloads folder: mods, maps, free apps, documents, music, books...),
-              "update_self" (arg = ""): downloads the newest Jarvis version and starts its installation; "check_update" (arg = ""),
-              "self_check" (arg = ""): reports which of Jarvis' own permissions, keys and services work or are missing,
-              "alert_on" (arg = words to watch in notifications; "a+b" needs both; Jarvis alerts quietly when one arrives), "alert_off" (arg = words or "all"), "alert_list" (arg = ""),
+              "update_self" (arg = ""): downloads the newest AXIOM version and starts its installation; "check_update" (arg = ""),
+              "self_check" (arg = ""): reports which of AXIOM's own permissions, keys and services work or are missing,
+              "alert_on" (arg = words to watch in notifications; "a+b" needs both; AXIOM alerts quietly when one arrives), "alert_off" (arg = words or "all"), "alert_list" (arg = ""),
               "navigate" (arg = place or address: opens turn-by-turn navigation),
               "play_music" (arg = "song, artist or playlist|optional app"), "share" (arg = "app|text": opens that app's share screen with the text; blank app = system share menu),
               "system_panel" (arg = "notifications", "quick_settings" or "collapse": pulls down / closes the phone's notification shade or quick settings; "pull down the notifications", "انزل الاشعارات" mean THIS, never open_app),
-              "delete_file" (arg = the name of what to delete: a file, an app or game Jarvis built, or an installed app):
+              "delete_file" (arg = the name of what to delete: a file, an app or game AXIOM built, or an installed app):
                   it always asks the user for confirmation. When you issue one, your reply must only say that you are asking, never that it is done.
           "remember": null or a short fact about the user worth storing long-term.
         A "Phone context" block follows: current time, battery, calendar, recent notifications, today's spending and habits.
@@ -128,9 +128,9 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         community mods and maps ("download Maghreb map for ETS2 1.75" means issue download now, never "I can't fetch that");
         update itself (update_self); diagnose itself (self_check: "why does X not work" starts there); watch notifications for words and alert
         quietly (alert_on); read and answer notifications; send messages (WhatsApp and SMS); call; open apps; look at photos via the LOOK button.
-        JARVIS IS TEXT ONLY: it reads and writes. It does not speak, listen, play games by itself, tap or operate other apps, or watch the screen:
+        AXIOM IS TEXT ONLY: it reads and writes. It does not speak, listen, play games by itself, tap or operate other apps, or watch the screen:
         those were removed. If asked for one of them, say so in one short line and offer what it can do (open the app, explain, search, write, remind, message).
-        ACT, DO NOT TEACH: when the user asks for something Jarvis can do with its actions, it does it now with the matching action and reports the result
+        ACT, DO NOT TEACH: when the user asks for something AXIOM can do with its actions, it does it now with the matching action and reports the result
         in one line. It never answers with steps or "you can do this by..." for something it can do itself.
         If a message continues, repeats or relates to a task from the recent conversation ("do it", "again", "the same", "that one"), it performs that task now with the earlier details.
         Never tell the user coordinates or button positions.
@@ -140,11 +140,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         and mood (new name, new story, new art), say that in one short line, and issue build_app. To improve something already built
         ("add caves", "make it harder"), reuse the same name so the existing version is upgraded.
         A question like "do you know X?" is conversation, not an open_app request.
-        Alarms, timers and reminders are Jarvis' OWN discreet system: never open or mention the phone's clock or alarm app. Delivery is a quiet
+        Alarms, timers and reminders are AXIOM's OWN discreet system: never open or mention the phone's clock or alarm app. Delivery is a quiet
         vibration and a silent pop-up, so it never embarrasses the user in public.
         NEVER say "I can't", "I cannot", "I am unable" or "لا أستطيع". If no single action fits, find a way: combine actions; build_app can create the missing tool; web_answer can research; remind can follow up later.
         Pick the closest route, do it, and say briefly what you did. Only genuinely harmful or illegal requests are declined, in one short line with a safe alternative.
-        A "pair code", "pairing code" or "/pair 123456" is ALWAYS Jarvis' Telegram pairing, never Bluetooth: ignore it, never open settings because of it.
+        A "pair code", "pairing code" or "/pair 123456" is ALWAYS AXIOM's Telegram pairing, never Bluetooth: ignore it, never open settings because of it.
         Only act on what the user actually asked in the latest message. Bluetooth, Wi-Fi, mobile data, airplane mode, location, display and sound:
         open_app with that word opens its system settings screen, where the user flips the switch.
         Downloads use only free, legal sources. If the user asks for paid or cracked content, say so in one line and download the free demo, trial
@@ -163,7 +163,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         their own, so never add an "other" option. When you ask, "action" is null and "reply" is the question in one short line. After the user answers, carry out the request at once and do not ask again.
         DECISION PROCEDURE (follow it every time): (1) Read ONLY the latest message; earlier turns are context, not orders. (2) Is it a question, chat, opinion or thanks? Answer it, action = null.
         (3) In the history, anything marked [ACTION DONE ...] is finished: never repeat it for "so?", "ok", "and?", "?" or similar; answer from its recorded result instead.
-        (4) forget_about is ONLY for facts in Jarvis' memory. To get rid of an app, game, file or anything on the phone ("forget it", "remove it", "delete it", "get rid of it") use delete_file with its exact name.
+        (4) forget_about is ONLY for facts in AXIOM's memory. To get rid of an app, game, file or anything on the phone ("forget it", "remove it", "delete it", "get rid of it") use delete_file with its exact name.
         (5) Missing detail you cannot infer: one ask. Otherwise act. (6) The reply states only what the action will really do; never invent results.
         UNREADABLE OR TOO SHORT (a keyboard slip, random letters, one meaningless word): never show a menu of generic options like "what do you want me to do: send a message / open an app / search".
         Reply in one short line quoting what you saw and asking what they meant, action = null, ask = null. Use "ask" only for a specific missing detail of a real request.
@@ -193,8 +193,14 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
         val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
+        val hist = memory.recentTurns(10).filterNot { stale(it.text) }
         return try {
-            parse(complete(system, userText, memory.recentTurns(10).filterNot { stale(it.text) }, imageB64, json = true, smart = true))
+            val raw = try {
+                Router.run(this, Router.T.REASON, Router.Opts(system, userText, hist, imageB64, json = true, task = "decide"))
+            } catch (e: Exception) {
+                complete(system, userText, hist, imageB64, json = true, smart = true)   // the old path stays as a safety net
+            }
+            parse(raw)
         } catch (e: Exception) {
             Decision(e.message ?: "The brain is unreachable.", failed = true)
         }
@@ -213,7 +219,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             Result.failure(IllegalStateException("$name: ${e.message}"))
         }
 
-    private suspend fun race(runners: List<Pair<String, () -> String>>, hedgeMs: Long): String {
+    internal suspend fun race(runners: List<Pair<String, () -> String>>, hedgeMs: Long): String {
         val winner = CompletableDeferred<String>()
         val errors = java.util.Collections.synchronizedList(ArrayList<String>())
         val failed = AtomicInteger(0)
@@ -369,7 +375,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     // ---- parsing ----
 
-    private fun parse(raw: String): Decision {
+    internal fun parse(raw: String): Decision {
         val cleaned = extractJson(raw)
         return try {
             val o = JSONObject(cleaned)
@@ -397,11 +403,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     // ---- model selection ----
 
-    private val geminiFallbacks = listOf(
+    internal val geminiFallbacks = listOf(
         "gemini-flash-lite-latest", "gemini-flash-latest", "gemini-3.1-flash-lite", "gemini-3-flash",
         "gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"
     )
-    private val groqPreferred = listOf("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b")
+    internal val groqPreferred = listOf("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b")
 
     /**
      * Tries the remembered model first, then every model the provider offers, then known fallbacks.
@@ -453,7 +459,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         throw last
     }
 
-    private fun discoverGemini(): List<String> {
+    internal fun discoverGemini(): List<String> {
         val resp = request("GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", null, null,
             mapOf("x-goog-api-key" to prefs.geminiKey), 15000)
         val arr = JSONObject(resp).optJSONArray("models") ?: return emptyList()
@@ -468,6 +474,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         return rankGemini(names)
     }
 
+    internal fun discoverGeminiRanked(names: List<String>): List<String> = rankGemini(names)
+
     private fun rankGemini(names: List<String>): List<String> {
         val banned = listOf("image", "tts", "live", "audio", "embedding", "robotics", "computer", "native", "learnlm", "gemma", "customtools")
         val ok = names.filter { n -> n.contains("flash") && banned.none { n.contains(it) } }
@@ -480,7 +488,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         ))
     }
 
-    private fun discoverGroq(): List<String> {
+    internal fun discoverGroq(): List<String> {
         val resp = request("GET", "https://api.groq.com/openai/v1/models", null, null,
             mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 15000)
         val arr = JSONObject(resp).optJSONArray("data") ?: return emptyList()
@@ -493,7 +501,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     // ---- Gemini ----
 
-    private fun geminiContents(history: List<Turn>, userText: String, imageB64: String?): JSONArray {
+    internal fun geminiContents(history: List<Turn>, userText: String, imageB64: String?): JSONArray {
         val contents = JSONArray()
         for (t in history) {
             contents.put(JSONObject()
@@ -550,7 +558,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
 
     // ---- Groq ----
 
-    private fun groqMessages(system: String, history: List<Turn>, userText: String): JSONArray {
+    internal fun groqMessages(system: String, history: List<Turn>, userText: String): JSONArray {
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", system))
         for (t in history) {
             msgs.put(JSONObject().put("role", if (t.role == "user") "user" else "assistant").put("content", t.text))
@@ -586,7 +594,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             }
         }
 
-    private fun groqTranscribe(wav: ByteArray): String {
+    internal fun groqTranscribe(wav: ByteArray): String {
         val lang = prefs.speechLocale.substringBefore('-').lowercase().takeIf { it.length in 2..3 }
         var last: Exception = IllegalStateException("No Whisper model available")
         for (model in listOf("whisper-large-v3-turbo", "whisper-large-v3")) {
@@ -613,12 +621,157 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         throw last
     }
 
+    // ---- low-level generation used by the model router ----
+
+    class Gen(val text: String, val inTok: Int, val outTok: Int, val sources: List<String> = emptyList())
+    class ModelInfo(val name: String, val methods: Set<String>, val inLimit: Int, val outLimit: Int)
+
+    private val thinkStyle = ConcurrentHashMap<String, String>()
+
+    @Volatile private var gemInfo: Pair<Long, List<ModelInfo>>? = null
+    @Volatile private var groqInfo: Pair<Long, List<ModelInfo>>? = null
+
+    /** Everything the Gemini key can actually use, with its real limits. Cached for six hours. */
+    internal fun geminiInfo(): List<ModelInfo> {
+        val c = gemInfo
+        if (c != null && System.currentTimeMillis() - c.first < 6 * 3600_000L) return c.second
+        return try {
+            val resp = request("GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", null, null,
+                mapOf("x-goog-api-key" to prefs.geminiKey), 15000)
+            val arr = JSONObject(resp).optJSONArray("models") ?: JSONArray()
+            val out = ArrayList<ModelInfo>()
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                val methods = HashSet<String>()
+                m.optJSONArray("supportedGenerationMethods")?.let { for (j in 0 until it.length()) methods.add(it.getString(j)) }
+                out.add(ModelInfo(m.getString("name").removePrefix("models/"), methods, m.optInt("inputTokenLimit", 0), m.optInt("outputTokenLimit", 0)))
+            }
+            gemInfo = System.currentTimeMillis() to out
+            out
+        } catch (e: Exception) { c?.second ?: emptyList() }
+    }
+
+    internal fun groqInfoList(): List<ModelInfo> {
+        val c = groqInfo
+        if (c != null && System.currentTimeMillis() - c.first < 6 * 3600_000L) return c.second
+        return try {
+            val resp = request("GET", "https://api.groq.com/openai/v1/models", null, null, mapOf("Authorization" to "Bearer ${prefs.groqKey}"), 15000)
+            val arr = JSONObject(resp).optJSONArray("data") ?: JSONArray()
+            val out = ArrayList<ModelInfo>()
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                out.add(ModelInfo(m.getString("id"), setOf("chat"), m.optInt("context_window", 0), m.optInt("max_completion_tokens", 0)))
+            }
+            groqInfo = System.currentTimeMillis() to out
+            out
+        } catch (e: Exception) { c?.second ?: emptyList() }
+    }
+
+    internal fun hasGemini() = prefs.geminiKey.isNotEmpty() && !Quota.authFailed("Gemini")
+    internal fun hasGroq() = prefs.groqKey.isNotEmpty() && !Quota.authFailed("Groq")
+
+    private fun thinkConfig(model: String, level: Int, style: String): JSONObject? {
+        val lv = level.coerceIn(0, 3)
+        return when (style) {
+            "level" -> JSONObject().put("thinkingLevel", listOf("minimal", "low", "medium", "high")[if (model.contains("pro") && lv == 0) 1 else lv])
+            "budget" -> JSONObject().put("thinkingBudget", if (model.contains("pro") && lv == 0) 512 else listOf(0, 1024, 4096, 8192)[lv])
+            else -> null
+        }
+    }
+
+    private fun styleOrder(model: String): List<String> {
+        val d = when {
+            model.contains("2.5") -> listOf("budget", "none")
+            model.contains("gemini-3") || model.contains("-3.") -> listOf("level", "none")
+            model.contains("2.0") || model.contains("1.5") -> listOf("none")
+            else -> listOf("level", "budget", "none")      // aliases such as gemini-flash-latest
+        }
+        val c = thinkStyle[model] ?: return d
+        return listOf(c) + d.filter { it != c }
+    }
+
+    internal fun gemGen(model: String, system: String, contents: JSONArray, temp: Double, maxOut: Int, thinking: Int, json: Boolean, grounded: Boolean, timeoutMs: Int): Gen {
+        var last: HttpError? = null
+        for (style in styleOrder(model)) {
+            try {
+                val gen = JSONObject().put("temperature", temp)
+                var mo = maxOut
+                val cfg = thinkConfig(model, thinking, style)
+                if (cfg != null) {
+                    gen.put("thinkingConfig", cfg)
+                    val b = cfg.optInt("thinkingBudget", 0)
+                    if (b > 0 && mo in 1..(b + 1023)) mo = b + 2048
+                }
+                if (mo > 0) gen.put("maxOutputTokens", mo)
+                if (json && !grounded) gen.put("responseMimeType", "application/json")
+                val body = JSONObject().put("contents", contents).put("generationConfig", gen)
+                if (system.isNotBlank()) body.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+                if (grounded) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+                val resp = request("POST", "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent",
+                    body.toString().toByteArray(Charsets.UTF_8), "application/json", mapOf("x-goog-api-key" to prefs.geminiKey), timeoutMs)
+                val root = JSONObject(resp)
+                val cand = root.optJSONArray("candidates")?.optJSONObject(0)
+                val parts = cand?.optJSONObject("content")?.optJSONArray("parts")
+                val sb = StringBuilder()
+                if (parts != null) for (i in 0 until parts.length()) {
+                    val part = parts.getJSONObject(i)
+                    if (!part.optBoolean("thought", false)) sb.append(part.optString("text", ""))
+                }
+                val urls = ArrayList<String>()
+                cand?.optJSONObject("groundingMetadata")?.optJSONArray("groundingChunks")?.let { ch ->
+                    for (i in 0 until ch.length()) ch.optJSONObject(i)?.optJSONObject("web")?.optString("uri", "")?.takeIf { it.startsWith("http") }?.let { urls.add(it) }
+                }
+                val u = root.optJSONObject("usageMetadata")
+                thinkStyle[model] = style
+                val g = Gen(sb.toString(), u?.optInt("promptTokenCount", 0) ?: 0, (u?.optInt("candidatesTokenCount", 0) ?: 0) + (u?.optInt("thoughtsTokenCount", 0) ?: 0), urls.distinct())
+                Quota.tokens("Gemini", g.inTok, g.outTok)
+                return g
+            } catch (e: HttpError) {
+                last = e
+                if (e.code != 400) throw e          // only a rejected setting is retried with the next style
+            }
+        }
+        throw last ?: IllegalStateException("Gemini gave no answer")
+    }
+
+    private val thinkTags = Regex("(?s)<think>.*?</think>")
+
+    internal fun groqGen(model: String, messages: JSONArray, temp: Double, maxOut: Int, effort: String?, timeoutMs: Int): Gen {
+        fun send(tuned: Boolean): Gen {
+            val body = JSONObject().put("model", model).put("messages", messages).put("temperature", temp)
+            if (tuned) {
+                body.put("max_completion_tokens", if (maxOut > 0) maxOut else 3000)
+                if (model.contains("gpt-oss") && effort != null) body.put("reasoning_effort", effort)
+                else if (model.contains("qwen") && effort != null) body.put("reasoning_effort", if (effort == "low") "none" else "default")
+            }
+            val resp = request("POST", "https://api.groq.com/openai/v1/chat/completions", body.toString().toByteArray(Charsets.UTF_8),
+                "application/json", mapOf("Authorization" to "Bearer ${prefs.groqKey}"), timeoutMs)
+            val root = JSONObject(resp)
+            val text = root.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content", "")
+            val u = root.optJSONObject("usage")
+            val g = Gen(thinkTags.replace(text, "").trim(), u?.optInt("prompt_tokens", 0) ?: 0, u?.optInt("completion_tokens", 0) ?: 0)
+            Quota.tokens("Groq", g.inTok, g.outTok)
+            return g
+        }
+        return try { send(true) } catch (e: HttpError) { if (e.code == 400) send(false) else throw e }
+    }
+
+    internal fun appPrefs(): Prefs = prefs
+
     // ---- HTTP ----
 
-    private fun request(
+    private val keyHosts = setOf("generativelanguage.googleapis.com", "api.groq.com", "api.telegram.org", "api.github.com")
+
+    internal fun request(
         method: String, url: String, body: ByteArray?, contentType: String?,
         headers: Map<String, String>, readTimeoutMs: Int
     ): String {
+        val host = URL(url).host
+        // a key may only ever travel to the provider it belongs to
+        if (headers.keys.any { it.equals("x-goog-api-key", true) || it.equals("Authorization", true) } && host !in keyHosts) {
+            throw IllegalStateException("Blocked: a key header was about to be sent to an untrusted host ($host).")
+        }
+        val provider = when { host.contains("googleapis") -> "Gemini"; host.contains("groq") -> "Groq"; else -> "" }
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = method
@@ -632,7 +785,12 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             }
             val code = c.responseCode
             val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-            if (code !in 200..299) throw HttpError(code, text)
+            if (provider.isNotEmpty() && method == "POST") Quota.request(provider, url.substringAfter("models/", "").substringBefore(':'), code)
+            if (code !in 200..299) {
+                var ra = ((c.getHeaderField("retry-after") ?: "").toDoubleOrNull() ?: 0.0) * 1000
+                if (ra <= 0.0) ra = (Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"").find(text)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0) * 1000
+                throw HttpError(code, text, ra.toLong())
+            }
             return text
         } finally {
             c.disconnect()

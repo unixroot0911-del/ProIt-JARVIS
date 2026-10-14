@@ -94,7 +94,7 @@ class FloatingChat(
         header.orientation = LinearLayout.HORIZONTAL
         header.gravity = Gravity.CENTER_VERTICAL
         val title = TextView(ctx).apply {
-            text = "JARVIS"
+            text = "AXIOM"
             setTextColor(cyan)
             textSize = 13f
             letterSpacing = 0.3f
@@ -129,7 +129,7 @@ class FloatingChat(
         scroll = sv
 
         val field = EditText(ctx).apply {
-            hint = "Message Jarvis"
+            hint = "Message AXIOM"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             textSize = 14f

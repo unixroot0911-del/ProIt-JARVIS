@@ -10,13 +10,69 @@ class Prefs(context: Context) {
     private fun str(key: String, def: String = ""): String = sp.getString(key, def) ?: def
     private fun put(key: String, v: String) = sp.edit().putString(key, v).apply()
 
+    /** Keys and tokens are stored encrypted (Android Keystore). Old plain values are migrated on first read. */
+    private fun secret(name: String): String {
+        val enc = sp.getString(name + "_enc", null)
+        if (enc != null) return Secrets.dec(enc)
+        val old = sp.getString(name, null)
+        if (!old.isNullOrEmpty()) { putSecret(name, old); return old }
+        return ""
+    }
+
+    private fun putSecret(name: String, v: String) {
+        val clean = v.trim()
+        val e = sp.edit().remove(name)
+        if (clean.isEmpty()) e.remove(name + "_enc") else e.putString(name + "_enc", Secrets.enc(clean))
+        e.apply()
+    }
+
+    /** A key that was revoked is remembered by its hash only, so it cannot quietly come back. */
+    fun isRevoked(key: String): Boolean = key.isNotEmpty() && (sp.getStringSet("revoked", emptySet()) ?: emptySet()).contains(Axiom.sha1(key))
+
+    fun revoke(name: String) {
+        val cur = secret(name)
+        if (cur.isNotEmpty()) {
+            val set = HashSet(sp.getStringSet("revoked", emptySet()) ?: emptySet())
+            set.add(Axiom.sha1(cur))
+            sp.edit().putStringSet("revoked", set).apply()
+        }
+        putSecret(name, "")
+    }
+
+    private fun setKey(name: String, v: String) { if (!isRevoked(v.trim())) putSecret(name, v) }
+
     var geminiKey: String
-        get() = str("gemini_key")
-        set(v) = put("gemini_key", v.trim())
+        get() = secret("gemini_key")
+        set(v) = setKey("gemini_key", v)
 
     var groqKey: String
-        get() = str("groq_key")
-        set(v) = put("groq_key", v.trim())
+        get() = secret("groq_key")
+        set(v) = setKey("groq_key", v)
+
+    var githubToken: String
+        get() = secret("github_token")
+        set(v) = setKey("github_token", v)
+
+    var emailPassword: String
+        get() = secret("email_password")
+        set(v) = setKey("email_password", v)
+
+    var emailAddress: String
+        get() = str("email_address")
+        set(v) = put("email_address", v.trim())
+
+    var emailImapHost: String
+        get() = str("email_imap", "imap.gmail.com")
+        set(v) = put("email_imap", v.trim())
+
+    var emailSmtpHost: String
+        get() = str("email_smtp", "smtp.gmail.com")
+        set(v) = put("email_smtp", v.trim())
+
+    /** The project new work goes into until the user switches. */
+    var activeProject: String
+        get() = str("active_project", "general")
+        set(v) = put("active_project", v.trim().ifEmpty { "general" })
 
     /** Last model that worked for each provider; rediscovered automatically if it is retired. */
     var geminiModel: String
@@ -81,8 +137,8 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putInt("watch_m", v).apply()
 
     var telegramToken: String
-        get() = str("tg_token")
-        set(v) = put("tg_token", v.trim())
+        get() = secret("tg_token")
+        set(v) = setKey("tg_token", v)
 
     /** Empty until the owner pairs with /pair CODE. Only this chat may command Jarvis. */
     var telegramChatId: String

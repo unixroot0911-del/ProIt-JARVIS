@@ -99,7 +99,7 @@ object Downloader {
         val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val req = DownloadManager.Request(Uri.parse(p.url))
             .setTitle(p.name)
-            .setDescription("Downloaded by Jarvis")
+            .setDescription("Downloaded by AXIOM")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)

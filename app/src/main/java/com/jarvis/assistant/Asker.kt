@@ -51,7 +51,7 @@ object Asker {
                     setPadding(px(20), px(18), px(20), px(14))
                     setBackgroundColor(Color.parseColor("#0B1220"))
                 }
-                col.addView(TextView(c).apply { text = "JARVIS ASKS"; setTextColor(cyan); textSize = 11f; letterSpacing = 0.25f })
+                col.addView(TextView(c).apply { text = "AXIOM ASKS"; setTextColor(cyan); textSize = 11f; letterSpacing = 0.25f })
                 col.addView(TextView(c).apply { text = spec.q; setTextColor(Color.WHITE); textSize = 18f; setPadding(0, px(8), 0, px(4)) })
                 if (spec.why.isNotBlank()) col.addView(TextView(c).apply { text = spec.why; setTextColor(Color.parseColor("#8FA3B8")); textSize = 12f; setPadding(0, 0, 0, px(8)) })
 

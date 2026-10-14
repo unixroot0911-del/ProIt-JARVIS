@@ -98,7 +98,7 @@ class MainActivity : AppCompatActivity() {
             maxLines = 8
         }
         input = EditText(this).apply {
-            hint = "Type to Jarvis"
+            hint = "Type to AXIOM"
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             imeOptions = EditorInfo.IME_ACTION_SEND
@@ -133,7 +133,7 @@ class MainActivity : AppCompatActivity() {
     private fun showCreations() {
         val names = Creations.names(this)
         val b = androidx.appcompat.app.AlertDialog.Builder(this).setTitle("My apps and games")
-        if (names.isEmpty()) b.setMessage("Nothing yet. Ask Jarvis: \"build me a game about ...\"")
+        if (names.isEmpty()) b.setMessage("Nothing yet. Ask AXIOM: \"build me a game about ...\"")
         else b.setItems(names.toTypedArray()) { _, i -> Creations.find(this, names[i])?.let { Creations.open(this, it) } }
         b.setPositiveButton("Close", null).show()
     }

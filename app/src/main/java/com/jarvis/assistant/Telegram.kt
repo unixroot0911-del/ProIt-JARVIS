@@ -70,6 +70,36 @@ object Telegram {
         }
     }
 
+    /** Sends any file to the paired owner chat as a document. */
+    fun sendFileToOwner(prefs: Prefs, file: java.io.File, caption: String): Boolean {
+        val token = prefs.telegramToken
+        val chat = prefs.telegramChatId
+        if (token.isEmpty() || chat.isEmpty()) return false
+        val boundary = "----axiom" + System.currentTimeMillis()
+        val c = URL("https://api.telegram.org/bot$token/sendDocument").openConnection() as HttpURLConnection
+        return try {
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.setChunkedStreamingMode(0)
+            c.connectTimeout = 15000
+            c.readTimeout = 120000
+            c.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            c.outputStream.use { o ->
+                fun field(n: String, v: String) = o.write("--$boundary\r\nContent-Disposition: form-data; name=\"$n\"\r\n\r\n$v\r\n".toByteArray())
+                field("chat_id", chat)
+                field("caption", caption.take(900))
+                o.write(("--$boundary\r\nContent-Disposition: form-data; name=\"document\"; filename=\"" + file.name.replace("\"", "") + "\"\r\nContent-Type: " + Workspace.mime(file) + "\r\n\r\n").toByteArray())
+                file.inputStream().use { it.copyTo(o) }
+                o.write("\r\n--$boundary--\r\n".toByteArray())
+            }
+            c.responseCode in 200..299
+        } catch (e: Exception) {
+            false
+        } finally {
+            c.disconnect()
+        }
+    }
+
     /** Sends to the paired owner chat, silently doing nothing if Telegram is not set up. */
     fun sendToOwner(prefs: Prefs, text: String) {
         val token = prefs.telegramToken
@@ -122,7 +152,7 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
         }
         if (chat.toString() != prefs.telegramChatId) return
         if (text.trim().lowercase().startsWith("/start")) {
-            withContext(Dispatchers.IO) { Telegram.send(token, chat, "Jarvis online. Say what you need.") }
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, "AXIOM online. Say what you need.") }
             return
         }
 

@@ -99,7 +99,7 @@ object Updater {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } catch (e: Exception) { /* settings unavailable */ }
-            return@withContext "Update $latest found. Allow \"Install unknown apps\" for Jarvis on the screen I just opened, then ask me to update again."
+            return@withContext "Update $latest found. Allow \"Install unknown apps\" for AXIOM on the screen I just opened, then ask me to update again."
         }
         val bytes = try { get(BASE + "jarvis.apk") } catch (e: Exception) {
             return@withContext "The download of $latest failed (${e.message}). Try again in a minute."
@@ -171,7 +171,7 @@ object Monitor {
 /** Quick Settings tile: pull down the status bar, tap Jarvis, and it starts listening. */
 class JarvisTile : TileService() {
     override fun onStartListening() {
-        qsTile?.let { it.state = Tile.STATE_INACTIVE; it.label = "Jarvis"; it.updateTile() }
+        qsTile?.let { it.state = Tile.STATE_INACTIVE; it.label = "AXIOM"; it.updateTile() }
     }
 
     override fun onClick() {

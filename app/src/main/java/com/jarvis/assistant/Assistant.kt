@@ -97,7 +97,7 @@ class Assistant(context: Context) {
         if (low.startsWith("/pair")) {
             return Reply("Pairing codes go to the Telegram bot, not here.", "Pairing codes go to the Telegram bot, not here.")
         }
-        if (low == "/start") return Reply("Jarvis online. Say what you need.", "Jarvis online. Say what you need.")
+        if (low == "/start") return Reply("AXIOM online. Say what you need.", "AXIOM online. Say what you need.")
         logChat("user", if (imageB64 != null) "[photo] $text" else text)
 
         val progress: (String) -> Unit = { m ->

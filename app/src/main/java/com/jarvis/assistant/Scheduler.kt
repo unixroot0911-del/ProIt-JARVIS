@@ -286,7 +286,7 @@ object Alerts {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             nm.notify((d.id and 0x7fffffff).toInt(), Notification.Builder(ctx, "jarvis_quiet")
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(if (wake) "Jarvis: wake up" else "Jarvis")
+                .setContentTitle(if (wake) "AXIOM: wake up" else "AXIOM")
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
                 .setCategory(Notification.CATEGORY_REMINDER)

@@ -2,4 +2,6 @@
 <paths>
     <cache-path name="images" path="images/" />
     <cache-path name="updates" path="updates/" />
+    <external-path name="axiom_shared" path="Documents/AXIOM/" />
+    <files-path name="axiom_private" path="workspace/" />
 </paths>

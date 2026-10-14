@@ -50,7 +50,7 @@ object Briefings {
         nm.createNotificationChannel(NotificationChannel("jarvis_brief", "Jarvis briefings", NotificationManager.IMPORTANCE_DEFAULT))
         val n = Notification.Builder(context, "jarvis_brief")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(if (kind == "morning") "Jarvis: morning briefing" else "Jarvis: evening briefing")
+            .setContentTitle(if (kind == "morning") "AXIOM: morning briefing" else "AXIOM: evening briefing")
             .setContentText(text.take(100))
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setAutoCancel(true)

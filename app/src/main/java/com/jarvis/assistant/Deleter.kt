@@ -37,7 +37,7 @@ object Deleter {
 
         // 1. apps and games Jarvis built
         Creations.find(ctx, q)?.let {
-            out.add(Target("creation", "\"${it.nameWithoutExtension}\"", "An app or game that Jarvis built for you. It will be removed from MY APPS AND GAMES.", file = it))
+            out.add(Target("creation", "\"${it.nameWithoutExtension}\"", "An app or game that AXIOM built for you. It will be removed from MY APPS AND GAMES.", file = it))
         }
 
         // 2. an exact path
@@ -81,7 +81,7 @@ object Deleter {
                 val f = t.file ?: return "Nothing to delete."
                 if (!f.exists()) return "${t.label} no longer exists."
                 if (f.delete()) "Deleted ${t.label}."
-                else "Android blocked the deletion of ${t.label}. Give Jarvis \"All files access\" (Settings, button 6), then ask again."
+                else "Android blocked the deletion of ${t.label}. Give AXIOM \"All files access\" (Settings, button 6), then ask again."
             }
         }
     }

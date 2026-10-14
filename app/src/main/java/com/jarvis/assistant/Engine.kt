@@ -54,7 +54,7 @@ object Confirmer {
                     ContextThemeWrapper(context.applicationContext, R.style.Theme_Jarvis)
                 }
                 val dlg = AlertDialog.Builder(ctx)
-                    .setTitle("Jarvis needs your OK")
+                    .setTitle("AXIOM needs your OK")
                     .setMessage(message)
                     .setNegativeButton("No") { _, _ -> if (cont.isActive) cont.resume(false) }
                     .setPositiveButton("Yes") { _, _ -> if (cont.isActive) cont.resume(true) }
