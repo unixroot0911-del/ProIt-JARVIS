@@ -122,7 +122,7 @@ class Assistant(context: Context) {
     private fun slug(q: String): String = q.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "_").trim('_').take(36).ifBlank { "answer" }
 
     private fun askText(a: AskSpec): String =
-        a.q + (if (a.options.isEmpty()) "" else "\n" + a.options.mapIndexed { i, o -> "${i + 1}. $o" }.joinToString("\n")) + "\nAnswer with a number or in your own words."
+        a.q + (if (a.options.isEmpty()) "" else "\n" + a.options.mapIndexed { i, o -> "${i + 1}. $o" }.joinToString("\n")) + (if (a.q.any { it in '؀'..'ۿ' }) "\nأجب برقم أو بكلماتك." else "\nAnswer with a number or in your own words.")
 
     private suspend fun handleInner(
         text: String,

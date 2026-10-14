@@ -31,6 +31,8 @@ object Offline {
     private val timer = rx("^(?:set (?:a )?)?(?:timer|مؤقت|تايمر)(?: for| ل| ديال)? ?(\\d{1,4}) ?(seconds?|secs?|ثانية|ثواني|ثانيه|minutes?|mins?|دقيقة|دقائق|دقايق|دقيقه|hours?|ساعة|ساعات|ساعه)$")
     private val alarm = rx("^(?:set (?:an? )?alarm(?: for| at)?|wake me(?: up)? at|منبه|نبهني|فيقني)\\s*(?:على|ف|في|at)?\\s*(\\d{1,2})(?::(\\d{2}))?$")
     private val open = rx("^(?:open|launch|go to|افتح|فتح|حل)\\s+(.{2,25})$")
+    private val panelDown = rx("^(?:pull down|show|open|drop|انزل|نزل|نزّل|اظهر|أظهر|افتح|فتح|حل|بين)\\s*(?:the |لي |ل)?\\s*(notifications?|notification (?:panel|shade|bar)|quick settings|الاشعارات|الإشعارات|اشعارات|إشعارات|الاعدادات السريعة|الإعدادات السريعة)$")
+    private val panelUp = rx("^(?:close|hide|collapse|ارفع|سد|اغلق|أغلق|خبي)\\s*(?:the |لي )?\\s*(notifications?|notification (?:panel|shade|bar)|quick settings|الاشعارات|الإشعارات|اشعارات|إشعارات|الاعدادات السريعة|الإعدادات السريعة)$")
     private val lastErr = rx("^(last error|show error|show the error|what went wrong|آخر خطأ|اخر خطأ|اخر خطا|آخر خطا|شنو وقع|ما الخطأ)$")
     private val call = rx("^(?:call|اتصل ب|اتصل بـ|اتصل|عيط ل|عيط على|كلم)\\s+(.{2,25})$")
 
@@ -38,6 +40,11 @@ object Offline {
         val t = raw.trim().trimEnd('.', '!', '?', '؟', '،').replace(Regex("\\s+"), " ")
         if (t.isEmpty() || t.length > 60) return null
 
+        panelDown.find(t)?.let { m ->
+            val q = m.groupValues[1].lowercase().let { it.contains("quick") || it.contains("السريعة") }
+            return d(t, "Done.", "تم.", "system_panel", if (q) "quick_settings" else "notifications")
+        }
+        if (panelUp.matches(t)) return d(t, "Done.", "تم.", "system_panel", "collapse")
         if (lastErr.matches(t)) return d(t, "Here is the last error.", "هذا آخر خطأ.", "last_error", "")
 
         if (torch.containsMatchIn(t) && t.split(" ").size <= 3) {

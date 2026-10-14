@@ -117,6 +117,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "alert_on" (arg = words to watch in notifications; "a+b" needs both; Jarvis alerts quietly when one arrives), "alert_off" (arg = words or "all"), "alert_list" (arg = ""),
               "navigate" (arg = place or address: opens turn-by-turn navigation),
               "play_music" (arg = "song, artist or playlist|optional app"), "share" (arg = "app|text": opens that app's share screen with the text; blank app = system share menu),
+              "system_panel" (arg = "notifications", "quick_settings" or "collapse": pulls down / closes the phone's notification shade or quick settings; "pull down the notifications", "انزل الاشعارات" mean THIS, never open_app),
               "delete_file" (arg = the name of what to delete: a file, an app or game Jarvis built, or an installed app):
                   it always asks the user for confirmation. When you issue one, your reply must only say that you are asking, never that it is done.
           "remember": null or a short fact about the user worth storing long-term.
@@ -164,6 +165,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         (3) In the history, anything marked [ACTION DONE ...] is finished: never repeat it for "so?", "ok", "and?", "?" or similar; answer from its recorded result instead.
         (4) forget_about is ONLY for facts in Jarvis' memory. To get rid of an app, game, file or anything on the phone ("forget it", "remove it", "delete it", "get rid of it") use delete_file with its exact name.
         (5) Missing detail you cannot infer: one ask. Otherwise act. (6) The reply states only what the action will really do; never invent results.
+        UNREADABLE OR TOO SHORT (a keyboard slip, random letters, one meaningless word): never show a menu of generic options like "what do you want me to do: send a message / open an app / search".
+        Reply in one short line quoting what you saw and asking what they meant, action = null, ask = null. Use "ask" only for a specific missing detail of a real request.
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 

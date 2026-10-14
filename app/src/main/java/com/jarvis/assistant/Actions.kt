@@ -23,6 +23,7 @@ class Actions(private val context: Context) {
                 "navigate" -> navigate(arg)
                 "play_music" -> playMusic(arg)
                 "share" -> share(arg)
+                "system_panel" -> systemPanel(arg)
                 else -> "Action '$type' is not supported yet."
             }
         } catch (e: Exception) {
@@ -172,7 +173,28 @@ class Actions(private val context: Context) {
         return map.firstOrNull { (keys, _) -> keys.any { n == it || n == "$it settings" || n == "${it} setting" } }?.second
     }
 
+    /** Pulls down the notification shade or quick settings (no root, no accessibility): StatusBarManager. */
+    fun systemPanel(what: String): String {
+        val w = what.trim().lowercase()
+        val method = when {
+            w.contains("collapse") || w.contains("close") || w.contains("hide") || w.contains("اغلق") || w.contains("سد") -> "collapsePanels"
+            w.contains("quick") || w.contains("setting") || w.contains("tile") || w.contains("سريع") -> "expandSettingsPanel"
+            else -> "expandNotificationsPanel"
+        }
+        return try {
+            val sb = context.getSystemService("statusbar")
+            Class.forName("android.app.StatusBarManager").getMethod(method).invoke(sb)
+            when (method) { "collapsePanels" -> "Panel closed."; "expandSettingsPanel" -> "Quick settings pulled down."; else -> "Notifications pulled down." }
+        } catch (e: Exception) {
+            if (method == "collapsePanels") "I could not close the panel on this phone."
+            else launch(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
+                ?: "This phone blocks pulling the panel down from an app; swipe down from the top edge."
+        }
+    }
+
     fun openApp(name: String, store: Boolean = true): String? {
+        val sys = name.trim().lowercase()
+        if (sys in setOf("notifications", "notification", "notification panel", "notification shade", "الاشعارات", "الإشعارات", "اشعارات", "إشعارات", "quick settings", "الاعدادات السريعة", "الإعدادات السريعة")) return systemPanel(sys)
         val pkg = findApp(name)
         if (pkg == null) {
             settingFor(name)?.let { return launch(Intent(it)) }
