@@ -160,6 +160,10 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         Never ask what the context answers, what has a safe obvious default, small talk, or something the user already told you or answered before. A "standing answer" in the memory
         means the question is already settled: use it. Ask at most ONE question. Give 2 to 4 concrete options in the user's language (the likeliest answers first), the user can always type
         their own, so never add an "other" option. When you ask, "action" is null and "reply" is the question in one short line. After the user answers, carry out the request at once and do not ask again.
+        DECISION PROCEDURE (follow it every time): (1) Read ONLY the latest message; earlier turns are context, not orders. (2) Is it a question, chat, opinion or thanks? Answer it, action = null.
+        (3) In the history, anything marked [ACTION DONE ...] is finished: never repeat it for "so?", "ok", "and?", "?" or similar; answer from its recorded result instead.
+        (4) forget_about is ONLY for facts in Jarvis' memory. To get rid of an app, game, file or anything on the phone ("forget it", "remove it", "delete it", "get rid of it") use delete_file with its exact name.
+        (5) Missing detail you cannot infer: one ask. Otherwise act. (6) The reply states only what the action will really do; never invent results.
         Never claim an action happened unless you issued it. For something truly outside all this, say the closest thing you can do and offer it.
     """.trimIndent()
 
@@ -187,7 +191,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
         val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
         return try {
-            parse(complete(system, userText, memory.recentTurns(8).filterNot { stale(it.text) }, imageB64, json = true))
+            parse(complete(system, userText, memory.recentTurns(10).filterNot { stale(it.text) }, imageB64, json = true, smart = true))
         } catch (e: Exception) {
             Decision(e.message ?: "The brain is unreachable.", failed = true)
         }
@@ -247,7 +251,8 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         imageB64: String? = null,
         json: Boolean = true,
         big: Boolean = false,
-        play: Boolean = false
+        play: Boolean = false,
+        smart: Boolean = false
     ): String {
         val haveGemini = prefs.geminiKey.isNotEmpty()
         val haveGroq = prefs.groqKey.isNotEmpty() && imageB64 == null && !play
@@ -258,11 +263,11 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
             )
         }
         val runners = ArrayList<Pair<String, () -> String>>()
-        if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json, if (big) 8000 else 0) })
-        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json, if (big) 16000 else 0, play) })
+        if (haveGroq) runners.add("Groq" to { groqRun(system, groqMessages(system, history, userText), json, if (big) 8000 else 0, smart) })
+        if (haveGemini) runners.add("Gemini" to { geminiRun(system, geminiContents(history, userText, imageB64), json, if (big) 16000 else 0, play || smart) })
         // healthy first; Groq leads when both are healthy; big generations prefer Gemini (much larger output limit)
         runners.sortBy { (if (isBad(it.first)) 2 else 0) + (if (big && it.first != "Gemini") 1 else 0) }
-        return race(runners, hedgeMs = if (big) 70000 else 6000)
+        return race(runners, hedgeMs = if (big) 70000 else if (smart) 9000 else 6000)
     }
 
     // ---- web answers ----
@@ -504,7 +509,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
         tryModels(if (think) "gemini-flash-latest" else prefs.geminiModel, { discoverGemini() }, geminiFallbacks,
             { if (!think) prefs.geminiModel = it }) { model ->
             fun send(fast: Boolean): String {
-                val gen = JSONObject().put("temperature", if (think) 0.35 else 0.7)
+                val gen = JSONObject().put("temperature", if (think) 0.3 else 0.7)
                 if (maxOut > 0) gen.put("maxOutputTokens", maxOut)
                 if (json) gen.put("responseMimeType", "application/json")
                 if (think) {
@@ -512,6 +517,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
                     gen.put("thinkingConfig",
                         if (model.contains("2.5")) JSONObject().put("thinkingBudget", 1024)
                         else JSONObject().put("thinkingLevel", "low"))
+                    if (maxOut == 0) gen.put("maxOutputTokens", 4096)
                 } else if (fast) {
                     // Gemini 2.5 and 3 "think" before answering, which costs seconds. Ask for no or minimal thinking.
                     gen.put("thinkingConfig",
@@ -554,13 +560,13 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
      * JSON mode is deliberately not used: it makes some models fail with "Failed to generate JSON".
      * The prompt demands JSON and [extractJson] recovers it from whatever the model returns.
      */
-    private fun groqRun(system: String, messages: JSONArray, @Suppress("UNUSED_PARAMETER") json: Boolean, maxOut: Int = 0): String =
-        tryModels(prefs.groqModel, { discoverGroq() }, groqPreferred, { prefs.groqModel = it }) { model ->
+    private fun groqRun(system: String, messages: JSONArray, @Suppress("UNUSED_PARAMETER") json: Boolean, maxOut: Int = 0, smart: Boolean = false): String =
+        tryModels(if (smart) "openai/gpt-oss-120b" else prefs.groqModel, { discoverGroq() }, groqPreferred, { if (!smart) prefs.groqModel = it }) { model ->
             fun send(tuned: Boolean): String {
-                val body = JSONObject().put("model", model).put("messages", messages).put("temperature", 0.6)
+                val body = JSONObject().put("model", model).put("messages", messages).put("temperature", if (smart) 0.3 else 0.6)
                 if (tuned) {
-                    body.put("max_completion_tokens", if (maxOut > 0) maxOut else 1024)
-                    if (model.contains("gpt-oss")) body.put("reasoning_effort", "low")
+                    body.put("max_completion_tokens", if (maxOut > 0) maxOut else if (smart) 3000 else 1024)
+                    if (model.contains("gpt-oss")) body.put("reasoning_effort", if (smart) "medium" else "low")
                     else if (model.contains("qwen")) body.put("reasoning_effort", "none")
                 }
                 val resp = request("POST", "https://api.groq.com/openai/v1/chat/completions",

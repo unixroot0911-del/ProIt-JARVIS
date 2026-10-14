@@ -95,8 +95,7 @@ class Assistant(context: Context) {
     ): Reply {
         val low = text.trim().lowercase()
         if (low.startsWith("/pair")) {
-            val msg = "That is the Telegram pairing code. Send it to your Telegram bot (not here) and I will pair with that chat."
-            return Reply(msg, msg)
+            return Reply("Pairing codes go to the Telegram bot, not here.", "Pairing codes go to the Telegram bot, not here.")
         }
         if (low == "/start") return Reply("Jarvis online. Say what you need.", "Jarvis online. Say what you need.")
         logChat("user", if (imageB64 != null) "[photo] $text" else text)
@@ -185,16 +184,19 @@ class Assistant(context: Context) {
         if (d.failed) return Reply(d.reply, d.reply, failed = true)
 
         val guarded = d.actionType?.let { Guard.needsConfirmation(it) } == true
-        withContext(Dispatchers.IO) {
-            memory.addTurn("user", text)
-            memory.addTurn("model", if (guarded) "(asked the user to confirm ${d.actionType})" else d.reply)
-            d.remember?.let { memory.addFact(it) }
-        }
-
         var shown = d.reply
         val type = d.actionType
+        var status: String? = null
+        if (type != null) status = execute(type, d.actionArg ?: "", confirm, onProgress)
+        // the history records what REALLY happened, so a follow-up like "so?" never repeats a finished action
+        withContext(Dispatchers.IO) {
+            memory.addTurn("user", text)
+            val hist = if (type == null) d.reply
+            else (if (guarded) "" else d.reply + " ") + "[ACTION DONE: " + type + "(" + clip(d.actionArg ?: "", 80) + ") -> " + clip(status ?: "ok", 160) + ". This task is finished; do not repeat it unless the user asks again.]"
+            memory.addTurn("model", hist)
+            d.remember?.let { memory.addFact(it) }
+        }
         if (type != null) {
-            val status = execute(type, d.actionArg ?: "", confirm, onProgress)
             if (guarded && !status.isNullOrBlank()) return Reply(status, status)   // only the real outcome, never "it is done" before it is
             if (!status.isNullOrBlank()) shown = shown + "\n" + status
         }
@@ -215,7 +217,7 @@ class Assistant(context: Context) {
         if (t in setOf("delete_file", "delete", "remove_file", "uninstall", "uninstall_app", "delete_app")) {
             val found = withContext(Dispatchers.IO) { Deleter.resolve(appContext, arg) }
             if (found.isEmpty()) {
-                return "I found nothing named \"$arg\" to delete. I checked the apps and games I built, Downloads, Documents, Pictures, Movies, Music, DCIM and your installed apps."
+                return "I found nothing named \"$arg\" to delete (it may already be gone). I checked the apps and games I built, Downloads, Documents, Pictures, Movies, Music, DCIM and your installed apps."
             }
             val targets = if (t.contains("uninstall") || t == "delete_app") found.sortedByDescending { it.kind == "app" } else found
             val x = targets.first()
@@ -279,7 +281,11 @@ class Assistant(context: Context) {
                 }
                 t == "forget_about" -> {
                     val p = arg.split("|", limit = 2).map { it.trim() }
-                    Dossier.forget(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" })
+                    val r = Dossier.forget(appContext, p.getOrElse(0) { "" }, p.getOrElse(1) { "" })
+                    // "forget / remove X" about something that is a built app, file or installed app means delete it (with confirmation)
+                    if (r.startsWith("I had nothing") && withContext(Dispatchers.IO) { Deleter.resolve(appContext, p.getOrElse(0) { "" }) }.isNotEmpty())
+                        protectedFlow("delete_file", p.getOrElse(0) { "" }, confirm, onProgress)
+                    else r
                 }
                 t == "memory_show" -> Dossier.overview(appContext, arg)
                 t == "last_error" -> Diag.report(appContext)

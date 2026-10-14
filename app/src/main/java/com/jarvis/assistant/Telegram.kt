@@ -107,8 +107,8 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
     }
 
     private suspend fun handle(token: String, chat: Long, text: String) {
-        withContext(Dispatchers.IO) {
-            if (text.startsWith("/pair")) {
+        if (text.startsWith("/pair")) {
+          withContext(Dispatchers.IO) {
                 val code = text.removePrefix("/pair").trim()
                 if (prefs.telegramChatId.isEmpty() && code == prefs.pairCode) {
                     prefs.telegramChatId = chat.toString()
@@ -117,9 +117,8 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
                 } else {
                     Telegram.send(token, chat, "Pairing failed.")
                 }
-                return@withContext
-            }
-            if (chat.toString() != prefs.telegramChatId) return@withContext   // strangers get no answer at all
+          }
+          return   // a pairing message is never passed on to the brain
         }
         if (chat.toString() != prefs.telegramChatId) return
         if (text.trim().lowercase().startsWith("/start")) {
