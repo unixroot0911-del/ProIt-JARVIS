@@ -142,7 +142,10 @@ class ControlActivity : AppCompatActivity() {
                 row.addView(btn("Details", false) { showText("Task ${id.takeLast(5)}", Tasks.detail(id)) }, LinearLayout.LayoutParams(0, -2, 1f))
                 if (st == Tasks.NEW || st == Tasks.READY) row.addView(btn("Run", true) { TaskEngine.resume(id); Tasks.set(id, "status" to Tasks.RUNNING); render(force = true) }, LinearLayout.LayoutParams(0, -2, 1f))
                 if (st == Tasks.FAILED || st == Tasks.CANCELLED) row.addView(btn("Retry", true) { TaskEngine.retry(id); render(force = true) }, LinearLayout.LayoutParams(0, -2, 1f))
-                if (st == Tasks.DONE) row.addView(btn("👍", false) { Perf.rate(id, 1); it.isEnabled = false }, LinearLayout.LayoutParams(0, -2, 0.5f)).also { row.addView(btn("👎", false) { Perf.rate(id, -1) }, LinearLayout.LayoutParams(0, -2, 0.5f)) }
+                if (st == Tasks.DONE) {
+                    row.addView(btn("👍", false) { Perf.rate(id, 1) }, LinearLayout.LayoutParams(0, -2, 0.5f))
+                    row.addView(btn("👎", false) { Perf.rate(id, -1) }, LinearLayout.LayoutParams(0, -2, 0.5f))
+                }
                 body.addView(card(
                     txt(Axiom.clip(r["goal"]!!, 120), 14f),
                     txt(Tasks.label(st).uppercase() + (if (r["fail_reason"]!!.isNotEmpty()) "  ·  " + Axiom.clip(r["fail_reason"]!!, 70) else "") + (if (r["verify"]!!.isNotEmpty()) "  ·  " + Axiom.clip(r["verify"]!!, 50) else ""), 11f, if (st == Tasks.FAILED) "#FF8A80" else "#6F8CA8"),

@@ -98,7 +98,8 @@ object Projects {
         val made = ArrayList<String>()
         for (i in 0 until arr.length()) {
             val ph = arr.optJSONObject(i) ?: continue
-            val title = ph.optString("title").trim().ifEmpty { continue }
+            val title = ph.optString("title").trim()
+            if (title.isEmpty()) continue
             val due = System.currentTimeMillis() + (ph.optDouble("due_days", 7.0).coerceIn(0.0, 365.0) * 86400_000L).toLong()
             Tasks.create(goal = title, project = key(name), descr = ph.optString("after"), role = "coordinator", priority = ph.optInt("priority", 3), status = Tasks.NEW, due = due)
             made.add(title)
