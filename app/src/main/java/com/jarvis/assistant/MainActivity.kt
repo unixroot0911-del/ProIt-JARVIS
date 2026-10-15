@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(btn("CHAT", true) { startActivity(Intent(this, ChatActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f))
         row.addView(btn("LOOK", true) { takeShot() }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
+        row.addView(btn("CONTROL", true) { startActivity(Intent(this, ControlActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
         row.addView(btn("SETTINGS", false) { startActivity(Intent(this, SettingsActivity::class.java)) }, LinearLayout.LayoutParams(0, 150, 1f).apply { marginStart = 16 })
 
         column.addView(status, LinearLayout.LayoutParams(-1, -2))

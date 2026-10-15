@@ -110,3 +110,9 @@ object Config {
 
     fun describe(): String = specs.joinToString("\n") { "${it.key} = ${get(it.key).ifEmpty { "(auto)" }}  — ${it.label}" }
 }
+
+/** One shared brain for the whole process (model discovery and health state are reused instead of repeated). */
+object Shared {
+    @Volatile private var b: Brain? = null
+    fun brain(): Brain = b ?: synchronized(this) { b ?: Brain(Prefs(Axiom.ctx), Memory.get(Axiom.ctx)).also { b = it } }
+}

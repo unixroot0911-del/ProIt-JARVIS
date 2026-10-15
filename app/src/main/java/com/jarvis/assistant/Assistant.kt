@@ -8,6 +8,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import org.json.JSONObject
 
 private val Scheduler_TYPES = setOf("set_alarm", "set_timer", "remind", "remind_at", "list_reminders", "cancel_reminder", "schedule_task")
 
@@ -16,11 +17,17 @@ data class Reply(val spoken: String, val shown: String, val failed: Boolean = fa
 
 /** The single pipeline every input goes through: voice, typed text, chat windows, Telegram, briefings. */
 class Assistant(context: Context) {
+    companion object {
+        @Volatile private var inst: Assistant? = null
+        /** One assistant for tools, tasks and background work. */
+        fun shared(): Assistant = inst ?: synchronized(this) { inst ?: Assistant(Axiom.ctx).also { inst = it } }
+    }
+
     val appContext: Context = context.applicationContext
     init { Diag.install(appContext) }
     private val prefs = Prefs(appContext)
     private val memory = Memory.get(appContext)
-    val brain = Brain(prefs, memory)
+    val brain = Shared.brain()
     private val actions = Actions(appContext)
     private val device = Device(appContext)
 
@@ -119,6 +126,9 @@ class Assistant(context: Context) {
         return r
     }
 
+    /** Lets tools and tasks run one of the phone actions through the same safe pipeline as chat. */
+    suspend fun runAction(type: String, arg: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String? = execute(type, arg, confirm, onProgress)
+
     private fun slug(q: String): String = q.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "_").trim('_').take(36).ifBlank { "answer" }
 
     private fun askText(a: AskSpec): String =
@@ -131,6 +141,11 @@ class Assistant(context: Context) {
         onProgress: (String) -> Unit,
         interactive: Boolean
     ): Reply {
+        // 0. Managing AXIOM itself (tasks, projects, usage, settings): rule-based, no model call.
+        if (imageB64 == null) {
+            val cmd = Commands.handle(text, prefs, brain)
+            if (cmd != null) return Reply(cmd, cmd)
+        }
         // 1. Instant commands: no internet, no AI quota.
         if (imageB64 == null) {
             val off = Offline.parse(text, actions)
@@ -187,7 +202,10 @@ class Assistant(context: Context) {
         var shown = d.reply
         val type = d.actionType
         var status: String? = null
-        if (type != null) status = execute(type, d.actionArg ?: "", confirm, onProgress)
+        if (type == "agent") {
+            val id = TaskEngine.start(d.actionArg?.ifBlank { text } ?: text, direct = true, source = if (interactive) "chat" else "telegram")
+            status = "Task ${id.takeLast(5)} started. It runs in the background and I will report when it is done. Say \"tasks\" to see progress, or \"stop ${id.takeLast(5)}\"."
+        } else if (type != null) status = execute(type, d.actionArg ?: "", confirm, onProgress)
         // the history records what REALLY happened, so a follow-up like "so?" never repeats a finished action
         withContext(Dispatchers.IO) {
             memory.addTurn("user", text)
@@ -227,6 +245,18 @@ class Assistant(context: Context) {
         }
         if (!confirm("Confirm: $type\n$arg")) return "Cancelled."
         return "I no longer operate other apps, so I cannot complete \"$type\" for you. Do the final step yourself in the app."
+    }
+
+    /** Direct use of any tool from the chat. The user typed the order, so it counts as direct (no extra approval for ordinary outside actions). */
+    private suspend fun runTool(name: String, argJson: String, confirm: suspend (String) -> Boolean, onProgress: (String) -> Unit): String {
+        val tool = Tools.get(name) ?: return "There is no tool called \"$name\"."
+        val args = try { JSONObject(argJson.trim().ifEmpty { "{}" }) } catch (e: Exception) {
+            // a single plain value goes to the tool's first argument
+            JSONObject().apply { tool.args.firstOrNull()?.let { put(it.name, argJson.trim()) } }
+        }
+        val c = ToolCtx(appContext, brain, prefs, "", prefs.activeProject, false, true, confirm, onProgress)
+        val r = Tools.execute(c, name, args)
+        return (if (r.ok) "" else "Failed: ") + r.output + (if (r.files.isNotEmpty()) "\nFiles:\n" + r.files.joinToString("\n") else "")
     }
 
     private val refusal = Regex(
@@ -315,6 +345,7 @@ class Assistant(context: Context) {
                 t == "alert_on" || t == "alert_off" || t == "alert_list" -> Monitor.run(appContext, t, arg)
                 t == "web_answer" -> brain.search(arg)
                 t in Scheduler_TYPES -> Scheduler.run(appContext, t, arg)
+                t == "tool" || Tools.get(t) != null -> runTool(if (t == "tool") arg.substringBefore('|').trim() else t, if (t == "tool") arg.substringAfter('|', "{}") else arg, confirm, onProgress)
                 t == "build_app" -> Creations.build(appContext, brain, arg, onProgress)
                 t == "open_creation" -> Creations.openByName(appContext, arg)
                 else -> actions.run(type, arg)

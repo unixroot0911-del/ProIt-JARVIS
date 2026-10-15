@@ -118,6 +118,10 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
               "navigate" (arg = place or address: opens turn-by-turn navigation),
               "play_music" (arg = "song, artist or playlist|optional app"), "share" (arg = "app|text": opens that app's share screen with the text; blank app = system share menu),
               "system_panel" (arg = "notifications", "quick_settings" or "collapse": pulls down / closes the phone's notification shade or quick settings; "pull down the notifications", "انزل الاشعارات" mean THIS, never open_app),
+              "agent" (arg = the user's goal in full, in their words: AXIOM plans it, runs it in the background with real tools, checks the result and reports back. Use it for ANYTHING that needs
+                  several steps, research, comparing sources, reading or making documents (PDF, Word, Excel, CSV), data analysis and charts, code, project work, monitoring a page, workflows or reports.
+                  Reply in one short line saying you started it),
+              "tool" (arg = "tool_name|{json arguments}": one direct tool call from the TOOL LIST below),
               "delete_file" (arg = the name of what to delete: a file, an app or game AXIOM built, or an installed app):
                   it always asks the user for confirmation. When you issue one, your reply must only say that you are asking, never that it is done.
           "remember": null or a short fact about the user worth storing long-term.
@@ -192,7 +196,7 @@ class Brain(private val prefs: Prefs, private val memory: Memory) {
     fun plainSystem(): String = base + studyRules() + factsBlock()
 
     suspend fun think(userText: String, context: String, imageB64: String?): Decision {
-        val system = base + jsonRules + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
+        val system = base + jsonRules + "\nTOOL LIST for the \"tool\" action (name(arguments), ? = optional):\n" + Tools.signatures() + studyRules() + factsBlock() + "\n\nPhone context:\n" + context
         val hist = memory.recentTurns(10).filterNot { stale(it.text) }
         return try {
             val raw = try {

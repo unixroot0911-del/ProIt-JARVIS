@@ -91,6 +91,12 @@
         </service>
 
         <receiver android:name=".AlarmReceiver" android:exported="false" />
+        <receiver android:name=".ApprovalReceiver" android:exported="false" />
+
+        <activity
+            android:name=".ControlActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
 
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>

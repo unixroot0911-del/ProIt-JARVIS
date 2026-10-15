@@ -114,6 +114,8 @@ object Quota {
  * Model names are never hard-wired: each provider is asked what it offers, and the best fit is picked from that list.
  */
 object Router {
+    val lastProvider = ConcurrentHashMap<String, String>()
+
     enum class T { CHAT, CLASSIFY, SUMMARIZE, EXTRACT, REASON, PLAN, VERIFY, CODE, WRITE, LONGDOC, FRESH }
 
     class Opts(
@@ -204,12 +206,15 @@ object Router {
         if (runners.isEmpty()) throw IllegalStateException("No brain available. " + skipped.joinToString("; "))
         runners.sortBy { if (Brain.isBad(it.first)) 1 else 0 }
 
+        val won = java.util.concurrent.atomic.AtomicReference<String?>(null)
+        val tracked = runners.map { r -> r.first to { val x = r.second(); won.compareAndSet(null, r.first); x } }
         val text = try {
-            brain.race(runners, pr.hedgeMs)
+            brain.race(tracked, pr.hedgeMs)
         } catch (e: Exception) {
             Perf.log("model", type.name, "", System.currentTimeMillis() - t0, 1, 0, false, friendly(e))
             throw e
         }
+        if (o.task.isNotEmpty()) won.get()?.let { lastProvider[o.task] = it }
         Perf.log("model", type.name, "", System.currentTimeMillis() - t0, 1, (o.system.length + o.user.length + text.length) / 4, true)
         if (key.isNotEmpty() && text.isNotBlank()) Cache.put(key, text, o.cacheTtlMs)
         return text

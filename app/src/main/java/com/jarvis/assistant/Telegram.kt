@@ -156,6 +156,24 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
             return
         }
 
+        // answers to questions AXIOM asked while working in the background
+        Regex("^/(yes|no)_(\\w+)$").find(text.trim())?.let { m ->
+            val ok = Approvals.answer(m.groupValues[2], m.groupValues[1])
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, if (ok) "Noted." else "That question is no longer waiting.") }
+            return
+        }
+        Regex("^/pick_(\\w+)_(\\d+)$").find(text.trim())?.let { m ->
+            val p = Approvals.pending[m.groupValues[1]]
+            val ok = p != null && Approvals.answer(m.groupValues[1], p.options.getOrNull(m.groupValues[2].toInt() - 1) ?: "")
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, if (ok) "Noted." else "That question is no longer waiting.") }
+            return
+        }
+        Regex("^/say_(\\w+)\\s+(.+)$", RegexOption.DOT_MATCHES_ALL).find(text.trim())?.let { m ->
+            val ok = Approvals.answer(m.groupValues[1], m.groupValues[2].trim())
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, if (ok) "Noted." else "That question is no longer waiting.") }
+            return
+        }
+
         var stepCount = 0
         val r = assistant.handle(
             text, null,

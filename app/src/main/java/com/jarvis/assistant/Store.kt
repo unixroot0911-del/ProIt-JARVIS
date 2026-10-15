@@ -27,7 +27,7 @@ class Store private constructor(ctx: Context) : SQLiteOpenHelper(ctx.application
             fail_reason TEXT NOT NULL DEFAULT '', verify TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', files TEXT NOT NULL DEFAULT '',
             tainted INTEGER NOT NULL DEFAULT 0, direct INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '',
             created INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0, started INTEGER NOT NULL DEFAULT 0, finished INTEGER NOT NULL DEFAULT 0,
-            calls INTEGER NOT NULL DEFAULT 0, ms INTEGER NOT NULL DEFAULT 0)""")
+            calls INTEGER NOT NULL DEFAULT 0, ms INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL DEFAULT 0, manual INTEGER NOT NULL DEFAULT 0)""")
         db.execSQL("CREATE INDEX tasks_status ON tasks(status)")
         db.execSQL("CREATE INDEX tasks_parent ON tasks(parent)")
         db.execSQL("""CREATE TABLE projects (

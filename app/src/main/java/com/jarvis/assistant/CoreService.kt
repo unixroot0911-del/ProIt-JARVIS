@@ -45,6 +45,8 @@ class CoreService : Service() {
         val a = assistant ?: Assistant(applicationContext).also { assistant = it }
         if (chat == null) chat = FloatingChat(this, a)
         Scheduler.rearmAll(this)
+        Notify.channels(this)
+        try { Cache.purge(); TaskEngine.resumeAll() } catch (e: Exception) { Diag.record(e) }
 
         if (botJob?.isActive != true) {
             botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }

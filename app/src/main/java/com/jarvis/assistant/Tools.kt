@@ -84,6 +84,10 @@ object Tools {
                 (if (t.risk == Risk.EXTERNAL || t.risk == Risk.DANGEROUS) " [needs approval when an agent chooses it]" else "")
         }
 
+    /** Names with their arguments only: small enough to give the chat brain. */
+    fun signatures(): String = all().filter { !Config.toolDisabled(it.name) && it.group != "core" || it.name == "time_now" }
+        .joinToString("; ") { t -> t.name + "(" + t.args.joinToString(",") { it.name + (if (it.required) "" else "?") } + ")" }
+
     private fun needsApproval(t: Tool, c: ToolCtx): Boolean {
         if (t.risk == Risk.DANGEROUS) return true
         val level = Config.get("approval")
@@ -148,7 +152,7 @@ object Tools {
         val limit = if (t.timeoutMs > 0) t.timeoutMs else Config.int("tool_timeout_s") * 1000L
         val res = try {
             withTimeoutOrNull(limit) { t.run(c, args) }
-                ?: return finish(fail("${t.name} did not finish within ${limit / 1000} seconds.", retriable = true), approved)
+                ?: return finish(fail("${t.name} did not finish within ${limit / 1000} seconds." + (if (t.risk >= Risk.EXTERNAL) " It may or may not have happened; check before repeating it." else ""), retriable = t.risk < Risk.EXTERNAL), approved)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: HttpError) {
