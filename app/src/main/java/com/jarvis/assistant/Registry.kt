@@ -8,5 +8,6 @@ object Registry {
         Web.register()
         Research.register()
         Watches.register()
+        DataTools.register()
     }
 }
