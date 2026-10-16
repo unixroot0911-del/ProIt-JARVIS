@@ -10,5 +10,8 @@ object Registry {
         Watches.register()
         DataTools.register()
         Inbox.register()
+        Workflows.register()
+        UserTools.register()
+        Mail.register()
     }
 }

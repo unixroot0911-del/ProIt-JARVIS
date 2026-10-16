@@ -62,11 +62,11 @@ class Prefs(context: Context) {
         set(v) = put("email_address", v.trim())
 
     var emailImapHost: String
-        get() = str("email_imap", "imap.gmail.com")
+        get() = str("email_imap", "")
         set(v) = put("email_imap", v.trim())
 
     var emailSmtpHost: String
-        get() = str("email_smtp", "smtp.gmail.com")
+        get() = str("email_smtp", "")
         set(v) = put("email_smtp", v.trim())
 
     /** The project new work goes into until the user switches. */
