@@ -5,5 +5,8 @@ object Registry {
     fun registerAll() {
         CoreTools.register()
         DocTools.register()
+        Web.register()
+        Research.register()
+        Watches.register()
     }
 }

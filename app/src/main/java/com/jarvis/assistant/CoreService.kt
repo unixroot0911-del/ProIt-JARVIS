@@ -21,6 +21,7 @@ import kotlin.math.abs
 class CoreService : Service() {
 
     private var botJob: Job? = null
+    private var tickJob: Job? = null
     private var orb: OrbView? = null
     private var orbListener: ((OrbState) -> Unit)? = null
     private var assistant: Assistant? = null
@@ -51,6 +52,7 @@ class CoreService : Service() {
         if (botJob?.isActive != true) {
             botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }
         }
+        if (tickJob?.isActive != true) tickJob = Engine.scope.launch { Ticker.loop(prefs) }
 
         if (prefs.overlayOn && Settings.canDrawOverlays(this)) showOrb() else { hideOrb(); chat?.hide() }
         return START_STICKY
@@ -119,6 +121,7 @@ class CoreService : Service() {
         chat?.hide()
         hideOrb()
         botJob?.cancel()
+        tickJob?.cancel()
         super.onDestroy()
     }
 }

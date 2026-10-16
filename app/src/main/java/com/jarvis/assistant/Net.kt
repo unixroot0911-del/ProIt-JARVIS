@@ -65,6 +65,29 @@ object Net {
         throw java.io.IOException("Too many redirects from $url")
     }
 
+    /** Saves a file from the web (PDF, image, spreadsheet...) with the same safety checks. Returns (content type, bytes written). */
+    fun download(url: String, dest: java.io.File, maxBytes: Long = 60_000_000L): Pair<String, Long> {
+        var cur = url
+        for (hop in 0..5) {
+            unsafe(cur)?.let { throw java.io.IOException("Not fetched: $it ($cur)") }
+            val c = URL(cur).openConnection() as HttpURLConnection
+            try {
+                c.instanceFollowRedirects = false
+                c.connectTimeout = 10000
+                c.readTimeout = 60000
+                c.setRequestProperty("User-Agent", UA)
+                val code = c.responseCode
+                if (code in 300..399) { cur = URL(URL(cur), c.getHeaderField("Location") ?: break).toString(); continue }
+                if (code !in 200..299) throw java.io.IOException("The server answered HTTP $code")
+                dest.parentFile?.mkdirs()
+                var total = 0L
+                c.inputStream.use { ins -> dest.outputStream().use { o -> val buf = ByteArray(32768); while (true) { val n = ins.read(buf); if (n <= 0) break; total += n; if (total > maxBytes) throw java.io.IOException("The file is larger than ${maxBytes / 1_000_000} MB"); o.write(buf, 0, n) } } }
+                return (c.contentType ?: "") to total
+            } finally { c.disconnect() }
+        }
+        throw java.io.IOException("Too many redirects from $url")
+    }
+
     /** Status code of a quick HEAD request (falling back to a ranged GET), or -1 when unreachable. */
     fun head(url: String): Int = try {
         val p = get(url, 10000, 2000, method = "HEAD")
