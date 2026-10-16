@@ -127,7 +127,10 @@ object Router {
         val maxOut: Int = 0,
         val cacheTtlMs: Long = 0L,
         val task: String = "",
-        val avoidProvider: String = ""
+        val avoidProvider: String = "",
+        /** A document (PDF, image...) sent along to Gemini, which reads files natively. */
+        val fileB64: String? = null,
+        val fileMime: String = ""
     )
 
     /** How each kind of job should be run: which provider leads, how hard to think, how warm to be. */
@@ -197,7 +200,7 @@ object Router {
         for (p in pr.order) {
             if (p == o.avoidProvider && pr.order.size > 1) continue
             if (p == "Gemini" && !brain.hasGemini()) { skipped.add("Gemini: no working key"); continue }
-            if (p == "Groq" && (!brain.hasGroq() || o.image != null)) { skipped.add("Groq: " + if (o.image != null) "cannot see images" else "no working key"); continue }
+            if (p == "Groq" && (!brain.hasGroq() || o.image != null || o.fileB64 != null)) { skipped.add("Groq: " + if (o.image != null || o.fileB64 != null) "cannot read files or images" else "no working key"); continue }
             if (!Quota.allow(p)) { skipped.add("$p: at the limit you set (" + Quota.report().lineSequence().firstOrNull { it.startsWith(p) } + ")"); continue }
             val models = (if (p == "Gemini") geminiCandidates(brain, pr.strong) else groqCandidates(brain, pr.strong)).filter { !Quota.cooling(it) }
             if (models.isEmpty()) { skipped.add("$p: every model is cooling down after a rate limit"); continue }
@@ -231,6 +234,13 @@ object Router {
         return JSONObject(Brain.extractJson(again))
     }
 
+    private fun withFile(contents: org.json.JSONArray, o: Opts): org.json.JSONArray {
+        if (o.fileB64 == null) return contents
+        val parts = contents.getJSONObject(contents.length() - 1).getJSONArray("parts")
+        parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", o.fileMime.ifEmpty { "application/pdf" }).put("data", o.fileB64)))
+        return contents
+    }
+
     private fun generate(brain: Brain, provider: String, models: List<String>, pr: Profile, o: Opts, type: T): String {
         var last: Exception = IllegalStateException("$provider produced nothing")
         for (m in models) {
@@ -239,7 +249,7 @@ object Router {
                 val t0 = System.currentTimeMillis()
                 val g = if (provider == "Gemini") {
                     val grounded = type == T.FRESH
-                    brain.gemGen(m, o.system, brain.geminiContents(o.history, o.user, o.image), pr.temp, o.maxOut, pr.thinking, o.json, grounded, if (o.maxOut > 8000) 150000 else 45000)
+                    brain.gemGen(m, o.system, withFile(brain.geminiContents(o.history, o.user, o.image), o), pr.temp, o.maxOut, pr.thinking, o.json, grounded, if (o.maxOut > 8000) 150000 else 45000)
                 } else {
                     brain.groqGen(m, brain.groqMessages(o.system, o.history, o.user), pr.temp, o.maxOut, pr.effort, if (o.maxOut > 8000) 150000 else 45000)
                 }

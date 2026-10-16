@@ -4,5 +4,6 @@ package com.jarvis.assistant
 object Registry {
     fun registerAll() {
         CoreTools.register()
+        DocTools.register()
     }
 }
