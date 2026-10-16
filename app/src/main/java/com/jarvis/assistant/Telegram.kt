@@ -125,7 +125,10 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
                     offset = u.getLong("update_id") + 1
                     val m = u.optJSONObject("message") ?: continue
                     val text = m.optString("text", "")
-                    if (text.isEmpty()) continue
+                    if (text.isEmpty()) {
+                        if (m.has("document") || m.has("photo") || m.has("voice") || m.has("audio")) handleFile(token, m.getJSONObject("chat").getLong("id"), m)
+                        continue
+                    }
                     handle(token, m.getJSONObject("chat").getLong("id"), text)
                 }
             } catch (e: CancellationException) {
@@ -134,6 +137,24 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
                 delay(5000)
             }
         }
+    }
+
+    private suspend fun handleFile(token: String, chat: Long, m: JSONObject) {
+        if (chat.toString() != prefs.telegramChatId) return
+        val caption = m.optString("caption", "").trim()
+        val (id, name) = when {
+            m.has("document") -> m.getJSONObject("document").let { it.getString("file_id") to it.optString("file_name", "") }
+            m.has("photo") -> m.getJSONArray("photo").let { a -> a.getJSONObject(a.length() - 1).getString("file_id") to "photo_" + System.currentTimeMillis() + ".jpg" }
+            m.has("voice") -> m.getJSONObject("voice").getString("file_id") to ("voice_" + System.currentTimeMillis() + ".ogg")
+            else -> m.getJSONObject("audio").let { it.getString("file_id") to it.optString("file_name", "audio_" + System.currentTimeMillis() + ".mp3") }
+        }
+        val (f, err) = withContext(Dispatchers.IO) { Inbox.fromTelegram(token, id, name, prefs.activeProject) }
+        if (f == null) { withContext(Dispatchers.IO) { Telegram.send(token, chat, "I could not receive the file: $err") }; return }
+        if (caption.isEmpty()) {
+            withContext(Dispatchers.IO) { Telegram.send(token, chat, "Received ${f.name} (${Workspace.human(f.length())}), saved in ${f.parent}. Tell me what to do with it (read, summarise, answer questions, add to knowledge, convert...).") }
+            return
+        }
+        handle(token, chat, caption + "\n[attached file: " + f.absolutePath + "]")
     }
 
     private suspend fun handle(token: String, chat: Long, text: String) {

@@ -60,6 +60,7 @@ class Assistant(context: Context) {
         sb.append("Pending reminders and alarms: ").append(Scheduler.summary(appContext)).append('\n')
         Creations.names(appContext).take(8).let { if (it.isNotEmpty()) sb.append("Apps and games built so far: ").append(it.joinToString(", ")).append('\n') }
         sb.append("Calendar today: ").append(device.calendarToday()).append('\n')
+        sb.append(Inbox.contextLine())
 
         val hours = if (detailed) 14 else 8
         val notifs = memory.recentNotifs(System.currentTimeMillis() - hours * 3600_000L, if (detailed) 30 else 12)

@@ -14,7 +14,7 @@ object Agents {
         Role("researcher", "Research agent",
             "You find and check information. Search with several differently worded queries, prefer official and primary sources, open the pages that matter, " +
                 "compare sources, note conflicts and dates, and never state as fact what you did not see. Keep a list of the URLs you used.",
-            setOf("web", "kb", "files", "github", "memory"), Router.T.REASON),
+            setOf("web", "kb", "files", "github", "memory", "research", "watch", "docs"), Router.T.REASON),
         Role("coder", "Coding agent",
             "You build and repair software. Understand the requirement, choose the simplest structure, write complete files, run the tests, read the real error, " +
                 "form a hypothesis, change ONE thing, run again, compare before and after, and undo a change that made things worse. Never edit many files at random.",

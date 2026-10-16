@@ -9,5 +9,6 @@ object Registry {
         Research.register()
         Watches.register()
         DataTools.register()
+        Inbox.register()
     }
 }

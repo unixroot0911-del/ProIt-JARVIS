@@ -25,6 +25,17 @@ class ChatActivity : AppCompatActivity() {
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
 
+    private val picker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        lifecycleScope.launch {
+            val files = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { uris.mapNotNull { Inbox.copyFrom(this@ChatActivity, it, prefs.activeProject) } }
+            if (files.isEmpty()) { add("jarvis", "I could not read that file."); return@launch }
+            val note = input.text.toString().trim().ifEmpty { "I attached a file. Read it and tell me what it is, then wait for what I want." }
+            input.setText("")
+            submit(note + "\n[attached file: " + files.joinToString(", ") { it.absolutePath } + "]")
+        }
+    }
+
     private var inflight = 0           // typing is never blocked while Jarvis works
     private var typing: View? = null
     private val maxBubble by lazy { (resources.displayMetrics.widthPixels * 0.78f).toInt() }
@@ -110,11 +121,16 @@ class ChatActivity : AppCompatActivity() {
             text = "SEND"
             setOnClickListener { sendTyped() }
         }
+        val attach = Button(this).apply {
+            text = "+"
+            setOnClickListener { picker.launch(arrayOf("*/*")) }
+        }
         val inputRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(16, 8, 16, 24)
         }
+        inputRow.addView(attach, LinearLayout.LayoutParams(-2, -2))
         inputRow.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
         inputRow.addView(send, LinearLayout.LayoutParams(-2, -2))
 
