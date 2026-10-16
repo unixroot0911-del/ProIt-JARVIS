@@ -55,6 +55,11 @@ class SettingsActivity : AppCompatActivity() {
         val morning = field(prefs.morningTime, "Morning time HH:MM")
         val evening = field(prefs.eveningTime, "Evening time HH:MM")
         val overlay = switch("Floating AXIOM: orb + chat window over other apps", prefs.overlayOn)
+        val ghToken = field(prefs.githubToken, "GitHub token (optional, for reading your repos)", true)
+        val mailAddr = field(prefs.emailAddress, "Email address (optional)")
+        val mailPass = field(prefs.emailPassword, "Email app password (not your normal password)", true)
+        val mailImap = field(prefs.emailImapHost, "IMAP host (blank = guessed from the address)")
+        val mailSmtp = field(prefs.emailSmtpHost, "SMTP host (blank = guessed from the address)")
         val tgToken = field(prefs.telegramToken, "Telegram bot token (from @BotFather)", true)
         pairInfo = TextView(this).apply { setTextColor(Color.WHITE) }
         statusView = TextView(this).apply { setTextColor(Color.WHITE); textSize = 12f; text = Health.report(this@SettingsActivity) }
@@ -71,6 +76,11 @@ class SettingsActivity : AppCompatActivity() {
             prefs.eveningTime = evening.text.toString().ifBlank { "21:00" }
             prefs.overlayOn = overlay.isChecked
             prefs.telegramToken = tgToken.text.toString()
+            prefs.githubToken = ghToken.text.toString()
+            prefs.emailAddress = mailAddr.text.toString()
+            prefs.emailPassword = mailPass.text.toString()
+            prefs.emailImapHost = mailImap.text.toString()
+            prefs.emailSmtpHost = mailSmtp.text.toString()
             Briefings.schedule(this)
             ContextCompat.startForegroundService(this, Intent(this, CoreService::class.java))
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
@@ -96,6 +106,14 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.telegramChatId = ""
                 prefs.resetPairCode()
                 refreshPairInfo()
+            })
+            addView(label("GITHUB")); addView(ghToken)
+            addView(label("EMAIL (read, summarise, draft; sending always asks you)")); addView(mailAddr); addView(mailPass); addView(mailImap); addView(mailSmtp)
+            addView(label("KEYS: remove a key completely"))
+            addView(button("Remove Gemini, Groq, GitHub and email keys") {
+                gemini.setText(""); groq.setText(""); ghToken.setText(""); mailPass.setText("")
+                prefs.geminiKey = ""; prefs.groqKey = ""; prefs.githubToken = ""; prefs.emailPassword = ""
+                Toast.makeText(this@SettingsActivity, "Keys removed", Toast.LENGTH_SHORT).show()
             })
             addView(label("PERMISSIONS (needed once)"))
             addView(button("1. Notification access (read and reply to messages)") {

@@ -28,7 +28,7 @@ object Agents {
             setOf("files", "docs"), Router.T.REASON),
         Role("automator", "Automation agent",
             "You turn repeated work into automatic work: scripts, workflows, schedules and watchers. You test on sample data first and describe what will run before it is switched on.",
-            setOf("automation", "files", "web", "code", "phone"), Router.T.CODE),
+            setOf("automation", "files", "web", "code", "phone", "ops"), Router.T.CODE),
         Role("writer", "Content agent",
             "You write: reports, articles, posts, emails, plans, scripts, translations. Know the audience and the goal, choose the tone, organise the ideas, remove repetition, " +
                 "keep every factual claim tied to the material you were given, and mark anything unverified.",

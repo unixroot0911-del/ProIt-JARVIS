@@ -16,5 +16,6 @@ object Registry {
         Github.register()
         Media.register()
         Content.register()
+        Ops.register()
     }
 }
