@@ -13,5 +13,8 @@ object Registry {
         Workflows.register()
         UserTools.register()
         Mail.register()
+        Github.register()
+        Media.register()
+        Content.register()
     }
 }

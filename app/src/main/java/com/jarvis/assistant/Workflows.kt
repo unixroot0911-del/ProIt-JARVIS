@@ -47,7 +47,7 @@ object Workflows {
                 val v = args.opt(k)
                 if (v is String) for (m in tmpl.findAll(v)) {
                     val p = m.groupValues[1].split('.')
-                    val ok = when (p[0]) { "trigger", "date", "prev" -> true; "steps" -> p.size >= 2 && p[1] in ids; else -> false }
+                    val ok = when (p[0]) { "trigger", "date", "prev" -> true; "steps" -> p.size >= 2 && p[1] in ids && (p.size == 2 || p[2] in listOf("output", "file")); else -> false }
                     if (!ok) return Check(null, "step $id uses {{${m.groupValues[1]}}} which refers to nothing before it (use trigger, date, prev or steps.<earlier id>.output)")
                 }
             }
@@ -100,13 +100,13 @@ object Workflows {
 
     // ---------- running ----------
 
-    private fun subst(v: String, outputs: Map<String, String>, prev: String, trigger: String): String =
+    private fun subst(v: String, outputs: Map<String, String>, prev: String, trigger: String, files: Map<String, String> = emptyMap()): String =
         tmpl.replace(v) { m ->
             val p = m.groupValues[1].split('.')
             when (p[0]) {
                 "trigger" -> trigger; "prev" -> prev
                 "date" -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-                "steps" -> outputs[p[1]] ?: ""; else -> ""
+                "steps" -> if (p.getOrNull(2) == "file") files[p[1]] ?: "" else outputs[p[1]] ?: ""; else -> ""
             }
         }
 
@@ -124,7 +124,7 @@ object Workflows {
         val steps = spec.getJSONArray("steps")
         val ctx = ToolCtx(base.app, base.brain, base.prefs, "wf:$wid", base.project, tainted = tainted, direct = false,
             confirm = { Approvals.yesNo(it, "wf:$wid") }, progress = {}, cancelled = { cancelled.contains(wid) })
-        val outputs = LinkedHashMap<String, String>()
+        val outputs = LinkedHashMap<String, String>(); val files = HashMap<String, String>()
         var prev = ""; var failed: String? = null; var lastOut = ""
         val t0 = System.currentTimeMillis()
         try {
@@ -133,10 +133,10 @@ object Workflows {
                 val s = steps.getJSONObject(i)
                 val args = JSONObject()
                 val raw = s.getJSONObject("args")
-                raw.keys().forEach { k -> val v = raw.get(k); args.put(k, if (v is String) subst(v, outputs, prev, trigger) else v) }
+                raw.keys().forEach { k -> val v = raw.get(k); args.put(k, if (v is String) subst(v, outputs, prev, trigger, files) else v) }
                 var r = Tools.execute(ctx, s.getString("tool"), args)
                 if (!r.ok && r.retriable && !r.declined) { kotlinx.coroutines.delay(3000); r = Tools.execute(ctx, s.getString("tool"), args) }
-                outputs[s.getString("id")] = Axiom.clip(r.output, 8000); prev = outputs[s.getString("id")]!!; lastOut = r.output
+                files[s.getString("id")] = r.files.firstOrNull() ?: ""; outputs[s.getString("id")] = Axiom.clip(r.output, 8000); prev = outputs[s.getString("id")]!!; lastOut = r.output
                 if (!r.ok && s.optString("on_fail") != "continue") { failed = "step ${i + 1} (${s.getString("tool")}) failed: ${Axiom.clip(r.output, 300)}"; break }
             }
         } catch (e: CancellationException) { running.remove(wid); throw e

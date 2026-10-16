@@ -175,7 +175,7 @@ object FileTools {
             }))
 
         Tools.register(Tool("send_file", "Send a file to the user's Telegram chat so they have it on any device.",
-            listOf(A("path", "file to send"), A("caption", "short caption", false)), Risk.EXTERNAL, group = "files",
+            listOf(A("path", "file to send"), A("caption", "short caption", false)), Risk.LOCAL, group = "files",
             run = { c, a ->
                 val f = Workspace.readable(a.getString("path"), c.project) ?: return@Tool fail("I may not send that.")
                 if (!f.exists()) return@Tool fail("Nothing at ${a.getString("path")}.")
