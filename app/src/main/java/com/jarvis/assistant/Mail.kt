@@ -126,7 +126,7 @@ object Mail {
                 val l = line()
                 if (l.startsWith("$tag ")) return l.substring(tag.length + 1) to acc.toByteArray()
                 acc.write(l.toByteArray(Charsets.ISO_8859_1)); acc.write("\r\n".toByteArray())
-                Regex("\\{(\\d+)}$").find(l)?.let { m ->
+                Regex("\\{(\\d+)\\}$").find(l)?.let { m ->
                     val len = m.groupValues[1].toInt(); val buf = ByteArray(len); var got = 0
                     while (got < len) { val r = ins.read(buf, got, len - got); if (r < 0) break; got += r }
                     acc.write(buf, 0, got)
@@ -172,7 +172,7 @@ object Mail {
             val (st, data) = cmd("UID FETCH $uid (FLAGS BODY.PEEK[])")
             if (!st.startsWith("OK")) return null
             val s = String(data, Charsets.ISO_8859_1)
-            val m = Regex("BODY\\[]\\s*\\{(\\d+)}\r\n").find(s) ?: return null
+            val m = Regex("BODY\\[\\]\\s*\\{(\\d+)\\}\r\n").find(s) ?: return null
             val len = m.groupValues[1].toInt(); val start = m.range.last + 1
             val raw = data.copyOfRange(start, minOf(data.size, start + len))
             return parse(uid, raw, s.substringBefore("BODY[").contains("\\Seen"))

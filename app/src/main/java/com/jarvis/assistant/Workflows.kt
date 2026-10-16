@@ -24,7 +24,7 @@ object Workflows {
 
     class Check(val spec: JSONObject?, val error: String?)
 
-    private val tmpl = Regex("\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*}}")
+    private val tmpl = Regex("\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*\\}\\}")
 
     /** Validates a spec against the real tool registry. */
     fun validate(raw: JSONObject): Check {
