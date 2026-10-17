@@ -28,7 +28,7 @@ object Vault {
     fun names(): List<String> = Store.get().query("SELECT name FROM vault ORDER BY name").map { it["name"]!! }
     fun values(): List<String> = Store.get().query("SELECT enc FROM vault").map { Secrets.dec(it["enc"]!!) }.filter { it.length >= 6 }
 
-    private val rx = Regex("\\{\\{\\s*secret:([A-Za-z0-9_.-]+)\\s*}}")
+    private val rx = Regex("\\{\\{\\s*secret:([A-Za-z0-9_.-]+)\\s*\\}\\}")
 
     /** Replaces every {{secret:name}} with the stored value. Returns null for the missing name when one is not stored. */
     fun fill(text: String): Pair<String, String?> {
