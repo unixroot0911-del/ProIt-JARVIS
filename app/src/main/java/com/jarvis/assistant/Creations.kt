@@ -27,13 +27,16 @@ import java.io.File
  */
 object Creations {
 
-    private const val SYSTEM = """You are an elite game and app developer. Output ONE complete, self-contained HTML5 file: HTML, CSS and JavaScript inline,
-no external libraries, fonts, images or network calls. Draw everything procedurally on a <canvas> (shapes, gradients, particles) or with DOM/CSS.
-Requirements for games: designed for a phone (portrait or landscape, resizes to the window), touch controls (virtual joystick and buttons) plus keyboard fallback,
-an intro cutscene of several story panels with typed text and animation that can be skipped, a real gameplay loop with progression and difficulty,
-sound effects through WebAudio (small, no files), a pause menu, progress saved in localStorage, and a proper ending screen when the story is completed.
-Everything must be ORIGINAL: new names, new story, new characters, new art. Never copy the characters, text, story or assets of an existing game or franchise;
-only the genre, mechanics and mood may be similar. Write clean working code with no placeholders and no TODOs, rich but compact (aim for 600 to 1500 lines).
+    private const val SYSTEM = """You are a senior product engineer and designer. Output ONE complete, self-contained HTML5 file: HTML, CSS and JavaScript inline,
+no external libraries, fonts, images or network calls (use system font stacks, inline SVG, CSS gradients, canvas). Quality bar: a professional, finished product, never a demo or a skeleton.
+FOR WEBSITES AND APPS: semantic HTML5 with proper <title>, meta description, lang and dir (full RTL support when the language is Arabic or Hebrew), a considered visual design (a real colour system with CSS variables,
+typographic scale, spacing, dark and light mode through prefers-color-scheme), fully responsive from 320px up, a sticky navigation with smooth scrolling and a mobile menu, a strong hero, every section the subject really needs
+(for example about, services or products, pricing, gallery, testimonials, FAQ, contact), real and specific written content in the user's language (never lorem ipsum, never "your text here"), a working contact or sign-up form with
+validation and a visible success state, micro-interactions and tasteful animation (respecting prefers-reduced-motion), accessibility (labels, alt text, focus states, contrast, keyboard use), Open Graph tags, and a footer.
+Apps must really work: state, edit and delete, saving in localStorage, empty states, error handling.
+FOR GAMES: designed for a phone (resizes to the window), touch controls plus keyboard fallback, an intro of several story panels that can be skipped, a real gameplay loop with progression and rising difficulty,
+WebAudio sound effects, a pause menu, saved progress, and a proper ending.
+Everything must be ORIGINAL; never copy characters, text, story or assets of an existing franchise. No placeholders, no TODOs, no commented-out stubs. Rich but compact (aim for 800 to 2500 lines).
 Output ONLY the code of the file, starting with <!DOCTYPE html>, no markdown fences, no commentary."""
 
     private fun dir(ctx: Context): File = File(ctx.filesDir, "creations").apply { mkdirs() }
@@ -73,15 +76,36 @@ Output ONLY the code of the file, starting with <!DOCTYPE html>, no markdown fen
         else
             "Build this: $name. Details from the user: $spec"
 
-        val raw = brain.complete(SYSTEM, prompt, emptyList(), null, json = false, big = true)
-        val html = clean(raw)
-        if (!html.contains("<html", ignoreCase = true) || !html.contains("</html>", ignoreCase = true) || html.length < 1200) {
-            return "The brain's answer was cut off or incomplete (free models have output limits). Ask again, or ask for a smaller first version and then upgrade it step by step."
+        var html = clean(brain.complete(SYSTEM, prompt, emptyList(), null, json = false, big = true))
+        // Check the result like a reviewer would: complete file, scripts that parse. Repair up to 2 times.
+        for (round in 1..2) {
+            val problem = problemsOf(html) ?: break
+            onProgress("Checking and repairing (round $round): $problem")
+            val fix = try {
+                clean(brain.complete(SYSTEM, "The file below has this problem: $problem\nReturn the COMPLETE corrected file, changing only what is needed.\n\nFILE:\n" + html.take(90000), emptyList(), null, json = false, big = true))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { break }
+            if (fix.length > 1200) html = fix
+        }
+        problemsOf(html)?.let {
+            return "I could not get a clean version: $it. Nothing was saved. Ask again, or ask for it in two parts (structure first, then upgrade it)."
         }
         withContext(Dispatchers.IO) { file.writeText(html) }
+        val copy = try { val d = File(Workspace.project("sites"), slug(name) + ".html"); d.writeText(html); Workspace.note(d.path, "build_app", name); d.path } catch (e: Exception) { null }
         open(ctx, file)
         return "Built \"$name\" (${html.length / 1024} KB) and opened it. It is saved under MY APPS AND GAMES. " +
-            "Tell me what to change or add and I will upgrade it."
+            (if (copy != null) "A copy for sharing or hosting is in $copy. " else "") + "Tell me what to change or add and I will upgrade it."
+    }
+
+    /** Null when the page is complete and its scripts parse; otherwise what is wrong. */
+    private suspend fun problemsOf(html: String): String? {
+        if (!html.contains("<html", ignoreCase = true) || !html.contains("</html>", ignoreCase = true) || html.length < 1200)
+            return "the file is cut off or incomplete"
+        val scripts = Regex("(?is)<script(?![^>]*\\bsrc=)[^>]*>(.*?)</script>").findAll(html).map { it.groupValues[1] }.filter { it.isNotBlank() }.toList()
+        for ((i, src) in scripts.withIndex()) {
+            val (good, out) = JsSandbox.run("try { new Function(DATA); return 'OK'; } catch (e) { return 'SYNTAX ' + e.message; }", src, 8000)
+            if (!good || !out.contains("OK")) return "script ${i + 1} has a JavaScript syntax error (" + Axiom.clip(out.replace("=> ", ""), 160) + ")"
+        }
+        return null
     }
 
     fun openByName(ctx: Context, name: String): String {

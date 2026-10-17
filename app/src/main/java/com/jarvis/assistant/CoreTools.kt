@@ -51,8 +51,8 @@ object CoreTools {
             run = { c, a -> act(c, a.getString("what"), a.getString("value")) }))
         Tools.register(Tool("download", "Find a free, legal download on the web and save it to the Downloads folder.", listOf(A("what", "what to download, or a direct link")), Risk.LOCAL, 240_000L, group = "phone",
             run = { c, a -> act(c, "download", a.getString("what")) }))
-        Tools.register(Tool("build_app", "Build a small game or tool as a self-contained app and open it.", listOf(A("name", "app name"), A("description", "what it does")), Risk.LOCAL, 360_000L, group = "code",
-            run = { c, a -> act(c, "build_app", a.getString("name") + "|" + a.getString("description")) }))
+        Tools.register(Tool("build_app", "Build a complete, professional game, website or web app as a self-contained page and open it. Pass real details: audience, sections, language, style, features.", listOf(A("name", "app name"), A("description", "what it is and does: audience, sections, language, style, features", false)), Risk.LOCAL, 360_000L, group = "code",
+            run = { c, a -> act(c, "build_app", a.getString("name") + "|" + a.optString("description", "")) }))
         Tools.register(Tool("phone_delete", "Delete a file, a built app or an installed app on the phone. Always asks the user first.", listOf(A("name", "what to delete")), Risk.LOCAL, 300_000L, group = "phone",
             run = { c, a -> act(c, "delete_file", a.getString("name")) }))
         Tools.register(Tool("memory_remember", "File a lasting fact (person, topic, preference, project) in AXIOM's sectioned memory.",
