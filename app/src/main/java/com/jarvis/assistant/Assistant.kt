@@ -37,6 +37,19 @@ class Assistant(context: Context) {
         return c.timeInMillis
     }
 
+    /** What AXIOM has linked itself to and learned to do: servers, connectors, mods and the skills that fit this request. */
+    private fun extensionBlock(text: String): String = try {
+        val sb = StringBuilder()
+        val mcp = Store.get().query("SELECT name FROM mcp_servers WHERE enabled = 1").joinToString(", ") { it["name"]!! }
+        if (mcp.isNotEmpty()) sb.append("LINKED MCP SERVERS (their tools are in the tool list as mcp_<server>_<tool>): ").append(mcp).append('\n')
+        val cn = Connectors.summaryLine(); if (cn.isNotEmpty()) sb.append("CONNECTORS (use connector_get / connector_send): ").append(cn).append('\n')
+        val cmds = Store.get().query("SELECT name, trig, kind FROM mods WHERE enabled = 1").joinToString("; ") { it["name"] + " [" + it["kind"] + (if (it["trig"]!!.isNotBlank()) ": " + it["trig"] else "") + "]" }
+        if (cmds.isNotEmpty()) sb.append("MODS: ").append(cmds).append('\n')
+        val idx = Skills.index(); if (idx.isNotEmpty()) sb.append("SKILLS AVAILABLE (applied automatically when a request matches):\n").append(idx).append('\n')
+        sb.append(Skills.contextFor(text))
+        sb.toString()
+    } catch (e: Exception) { "" }
+
     private fun memoryBlock(text: String, mentions: List<String>): String {
         return try {
             val low = text.lowercase()
@@ -108,6 +121,19 @@ class Assistant(context: Context) {
         if (low == "/start") return Reply("AXIOM online. Say what you need.", "AXIOM online. Say what you need.")
         logChat("user", if (imageB64 != null) "[photo] $text" else text)
 
+        // a command mod (a /command or phrase the user taught AXIOM) answers before the brain is asked
+        if (imageB64 == null) {
+            val hit = try { withContext(Dispatchers.IO) { Mods.matchCommand(text) } } catch (e: Exception) { null }
+            if (hit != null) {
+                onProgress("Running mod ${hit.first["name"]}...")
+                ChatBus.publish("system", "Running mod ${hit.first["name"]}...")
+                val (good, out) = try { Mods.runMod(hit.first, hit.second) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) { false to (e.message ?: "failed") }
+                val msg = if (good) out.ifBlank { "(done)" } else "The mod ${hit.first["name"]} failed: $out"
+                logChat("jarvis", msg)
+                return Reply(msg, msg, failed = !good)
+            }
+        }
+
         val progress: (String) -> Unit = { m ->
             onProgress(m)
             if (m.startsWith("AGENT:")) {
@@ -164,7 +190,7 @@ class Assistant(context: Context) {
             buildContext() + "Installed apps: " + actions.installedLabels().joinToString(", ") + "\n" +
                 (if (mentions.isNotEmpty()) "Installed apps whose names resemble words in the message (a hint only, not necessarily what they mean): " + mentions.joinToString(", ") + "\n" else "") +
                 (if (prefs.smartAsk) "" else "Smart questions are OFF: never use the ask key; decide with your best reading.\n") +
-                memoryBlock(text, mentions)
+                memoryBlock(text, mentions) + extensionBlock(text)
         }
         var d = brain.think(text, ctx, imageB64)
         if (!d.failed && d.actionType == null && refusal.containsMatchIn(d.reply) && d.ask == null) {

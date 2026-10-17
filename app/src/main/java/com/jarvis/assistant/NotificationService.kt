@@ -1,5 +1,6 @@
 package com.jarvis.assistant
 
+import kotlinx.coroutines.launch
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.RemoteInput
@@ -76,6 +77,8 @@ class JarvisNotificationService : NotificationListenerService() {
             }
             Memory.get(applicationContext).addNotif(sbn.packageName, app, title, text)
             Monitor.onNotification(applicationContext, app, title, text)
+            val pk = sbn.packageName
+            Engine.scope.launch { try { Mods.onNotification(pk, app, title, text) } catch (e: Throwable) { Diag.record(e) } }
 
             n.actions?.forEach { a ->
                 val ris = a.remoteInputs

@@ -68,7 +68,7 @@ object Agents {
     suspend fun work(c: ToolCtx, roleName: String, goal: String, context: String, maxSteps: Int): ToolResult {
         val r = role(roleName)
         val limit = maxSteps.coerceIn(2, minOf(Config.int("max_steps"), 14))
-        val system = "You are the ${r.title} of AXIOM.\n" + r.prompt + style() + "\n" + Shield.RULES + "\n\n" +
+        val system = "You are the ${r.title} of AXIOM.\n" + r.prompt + style() + "\n" + Shield.RULES + "\n\n" + Skills.contextFor(goal, 2) + "\n" +
             "You work in steps. Each turn answer with ONE JSON object and nothing else:\n" +
             "  {\"thought\":\"one short line\",\"tool\":\"tool_name\",\"args\":{...}}     to use a tool\n" +
             "  {\"final\":\"the complete result for the user\",\"files\":[\"paths of files you made\"]}     when the goal is reached\n" +

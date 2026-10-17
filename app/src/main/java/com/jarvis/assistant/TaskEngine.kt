@@ -107,11 +107,11 @@ object TaskEngine {
                 Tasks.set(id, "status" to Tasks.PLANNING)
                 say(root, "Planning: " + Axiom.clip(root["goal"]!!, 80), telegram = root["source"] == "telegram")
                 val memory = try { Knowledge.contextFor(root["goal"]!!, root["project"]!!) } catch (e: Exception) { "" }
-                var plan = Planner.plan(brain(), root["goal"]!!, root["project"]!!, memory, id)
+                var plan = Planner.plan(brain(), root["goal"]!!, root["project"]!!, memory + "\n" + Skills.contextFor(root["goal"]!!, 3), id)
                 if (plan.ask != null) {
                     val ans = Approvals.ask(plan.ask!!.q, plan.ask!!.options, id)
                     if (ans.isEmpty()) { fin(id, Tasks.FAILED, "I needed an answer to: ${plan.ask!!.q} and did not get one."); return }
-                    plan = Planner.plan(brain(), root["goal"]!!, root["project"]!!, memory, id, ans)
+                    plan = Planner.plan(brain(), root["goal"]!!, root["project"]!!, memory + "\n" + Skills.contextFor(root["goal"]!!, 3), id, ans)
                 }
                 if (plan.steps.isEmpty()) { fin(id, Tasks.FAILED, "The plan came back empty."); return }
                 addSteps(root, plan.steps, emptyMap())

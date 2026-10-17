@@ -87,8 +87,12 @@ object Tools {
         }
 
     /** Names with their arguments only: small enough to give the chat brain. */
-    fun signatures(): String = all().filter { !Config.toolDisabled(it.name) && it.group != "core" || it.name == "time_now" }
-        .joinToString("; ") { t -> t.name + "(" + t.args.joinToString(",") { it.name + (if (it.required) "" else "?") } + ")" }
+    fun signatures(): String {
+        val list = all().filter { !Config.toolDisabled(it.name) && it.group != "core" || it.name == "time_now" }
+        val (mcp, rest) = list.partition { it.group == "mcp" && it.name.startsWith("mcp_") && it.name.count { ch -> ch == '_' } >= 2 && it.description.contains("[MCP server:") }
+        fun sig(t: Tool) = t.name + "(" + t.args.joinToString(",") { it.name + (if (it.required) "" else "?") } + ")"
+        return rest.joinToString("; ") { sig(it) } + (if (mcp.isEmpty()) "" else "; " + mcp.take(60).joinToString("; ") { sig(it) } + (if (mcp.size > 60) "; (+${mcp.size - 60} more MCP tools: use mcp_list and mcp_call)" else ""))
+    }
 
     private fun needsApproval(t: Tool, c: ToolCtx): Boolean {
         if (t.risk == Risk.DANGEROUS) return true

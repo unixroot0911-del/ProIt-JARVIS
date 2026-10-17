@@ -18,5 +18,8 @@ object Registry {
         Content.register()
         Ops.register()
         Mcp.register()
+        Connectors.register()
+        Skills.register()
+        Mods.register()
     }
 }

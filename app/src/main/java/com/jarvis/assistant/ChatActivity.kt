@@ -167,7 +167,7 @@ class ChatActivity : AppCompatActivity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#05080F"))
+            setBackgroundColor(UiTheme.background)
         }
 
         val bar = LinearLayout(this).apply {
@@ -201,6 +201,15 @@ class ChatActivity : AppCompatActivity() {
             head.addView(panelTitle, LinearLayout.LayoutParams(0, -2, 1f)); head.addView(stop, LinearLayout.LayoutParams(-2, 90))
             addView(head); addView(panelLines)
         }
+
+        bar.addView(Button(this).apply {
+            text = "MODS"; textSize = 11f
+            setOnClickListener {
+                val panels = Store.get().query("SELECT name, descr FROM mods WHERE enabled = 1 AND kind = 'panel' ORDER BY name")
+                if (panels.isEmpty()) AlertDialog.Builder(this@ChatActivity).setTitle("Mods").setMessage("No panel mods yet. Ask AXIOM: make a mod that ...").setPositiveButton("OK", null).show()
+                else AlertDialog.Builder(this@ChatActivity).setTitle("Mods").setItems(panels.map { it["name"] + " - " + (it["descr"] ?: "").take(40) }.toTypedArray()) { _, i -> Mods.openPanel(applicationContext, panels[i]["name"]!!) }.show()
+            }
+        }, LinearLayout.LayoutParams(-2, -2))
 
         list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

@@ -22,18 +22,18 @@ object ChatUi {
     fun bubble(ctx: Context, role: String, text: String, maxWidthPx: Int): View {
         val tv = TextView(ctx)
         tv.text = text
-        tv.textSize = 15f
+        tv.textSize = try { UiTheme.textSize } catch (e: Exception) { 15f }
         tv.maxWidth = maxWidthPx
         tv.setTextIsSelectable(true)
         when (role) {
             "user" -> {
                 tv.setTextColor(Color.WHITE)
-                tv.background = round("#1B4F8A", null, 36f)
+                tv.background = round(String.format("#%06X", 0xFFFFFF and UiTheme.userBubble), null, 36f)
                 tv.setPadding(30, 20, 30, 20)
             }
             "jarvis" -> {
-                tv.setTextColor(Color.parseColor("#CFE8FF"))
-                tv.background = round("#0E1B2B", "#1F4B6E", 36f)
+                tv.setTextColor(UiTheme.aiText)
+                tv.background = round(String.format("#%06X", 0xFFFFFF and UiTheme.aiBubble), String.format("#%06X", 0xFFFFFF and UiTheme.accent), 36f)
                 tv.setPadding(30, 20, 30, 20)
             }
             else -> {
