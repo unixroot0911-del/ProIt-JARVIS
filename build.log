@@ -1,0 +1,82 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:javaPreCompileDebug
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:processDebugManifestForPackage
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeDebugStartupProfile
+> Task :app:mergeDebugJniLibFolders
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:mergeLibDexDebug
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:processDebugResources
+> Task :app:mergeExtDexDebug
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Asker.kt:96:76 'SOFT_INPUT_ADJUST_RESIZE: Int' is deprecated. Deprecated in Java
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Assistant.kt:259:9 Parameter 'onProgress' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Assistant.kt:298:9 Parameter 'confirm' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Assistant.kt:299:9 Parameter 'onProgress' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Brain.kt:590:25 Parameter 'system' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/ChatActivity.kt:68:73 'SOFT_INPUT_ADJUST_RESIZE: Int' is deprecated. Deprecated in Java
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Content.kt:187:518 Unnecessary non-null assertion (!!) on a non-null receiver of type File
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/DocMaker.kt:467:44 There is more than one label with such a name in this scope
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Dossier.kt:31:39 'FLAG_IS_GAME: Int' is deprecated. Deprecated in Java
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/FloatingChat.kt:231:17 Variable 'r' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Mail.kt:38:34 Parameter 'header' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Mcp.kt:244:98 Unsafe use of a nullable receiver of type JSONArray?
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Mcp.kt:253:25 Parameter 'c' is never used, could be renamed to _
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Mods.kt:167:22 Parameter 'c' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Projects.kt:58:36 Parameter 'goal' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Projects.kt:58:50 Parameter 'answer' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:95:45 Unchecked cast: Array<out String> to Array<String>
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:111:45 Unchecked cast: Array<out String> to Array<String>
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:113:83 Unchecked cast: Array<out Any?> to Array<Any?>
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:119:140 Unchecked cast: Array<out String> to Array<String>
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:121:117 Unchecked cast: Array<out String> to Array<String>
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Store.kt:166:14 Parameter 'taskName' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:81:13 Variable 'r' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:121:13 The value 'Tasks.get(id)!!' assigned to 'var root: Map<String, String> defined in com.jarvis.assistant.TaskEngine.runRoot' is never used
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:162:82 Type mismatch: inferred type is String? but String was expected
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:166:91 Type mismatch: inferred type is String? but String was expected
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:169:66 Type mismatch: inferred type is String? but String was expected
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/TaskEngine.kt:282:82 Type mismatch: inferred type is String? but String was expected
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/UserTools.kt:85:236 Unsafe use of a nullable receiver of type JSONArray?
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/UserTools.kt:96:186 Unsafe use of a nullable receiver of type JSONArray?
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/Verifier.kt:53:21 Variable 'notes' initializer is redundant
+w: file:///home/runner/work/ProIt-JARVIS/ProIt-JARVIS/app/src/main/java/com/jarvis/assistant/WebTools.kt:209:21 Parameter 'c' is never used, could be renamed to _
+
+> Task :app:compileDebugJavaWithJavac NO-SOURCE
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics
+> Task :app:processDebugJavaRes
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1792246798017.json
+
+BUILD SUCCESSFUL in 1m 29s
+35 actionable tasks: 35 executed
