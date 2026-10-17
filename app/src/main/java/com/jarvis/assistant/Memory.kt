@@ -119,7 +119,7 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
 
     fun recentTurns(limit: Int = 12): List<Turn> {
         val out = ArrayList<Turn>()
-        readableDatabase.rawQuery("SELECT role, text FROM turns WHERE mode = ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), limit.toString())).use {
+        readableDatabase.rawQuery("SELECT role, text FROM turns WHERE mode = ? AND ts >= ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), Prefs(app).contextSince.toString(), limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()

@@ -3,6 +3,7 @@ package com.jarvis.assistant
 import android.app.Application
 import android.content.Context
 import java.security.MessageDigest
+import kotlinx.coroutines.launch
 
 /** Process-wide handle. Set once when the app starts so every layer can reach the database and settings. */
 class AxiomApp : Application() {
@@ -10,12 +11,16 @@ class AxiomApp : Application() {
         super.onCreate()
         Axiom.ctx = applicationContext
         Diag.install(applicationContext)
+        Engine.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try { Upgrade.run(applicationContext) } catch (e: Throwable) { Diag.record(e) }
+            try { Store.get(); Prefs(applicationContext).let { it.geminiKey; it.groqKey; it.telegramToken }; Tools.ensure(); Shared.brain() } catch (e: Throwable) { Diag.record(e) }
+        }
     }
 }
 
 object Axiom {
     const val NAME = "AXIOM"
-    const val VERSION = "0.16.0"
+    const val VERSION = "0.16.1"
 
     @Volatile lateinit var ctx: Context
 

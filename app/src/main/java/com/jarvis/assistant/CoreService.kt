@@ -45,14 +45,14 @@ class CoreService : Service() {
 
         val a = assistant ?: Assistant(applicationContext).also { assistant = it }
         if (chat == null) chat = FloatingChat(this, a)
-        Scheduler.rearmAll(this)
-        Notify.channels(this)
-        try { Cache.purge(); TaskEngine.resumeAll() } catch (e: Exception) { Diag.record(e) }
+        Engine.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try { Scheduler.rearmAll(applicationContext); Notify.channels(applicationContext); Cache.purge(); TaskEngine.resumeAll() } catch (e: Throwable) { Diag.record(e) }
+        }
 
         if (botJob?.isActive != true) {
-            botJob = Engine.scope.launch { TelegramBot(prefs, a).loop() }
+            botJob = Engine.supervise { TelegramBot(prefs, a).loop() }
         }
-        if (tickJob?.isActive != true) tickJob = Engine.scope.launch { Ticker.loop(prefs) }
+        if (tickJob?.isActive != true) tickJob = Engine.supervise { Ticker.loop(prefs) }
 
         if (prefs.overlayOn && Settings.canDrawOverlays(this)) showOrb() else { hideOrb(); chat?.hide() }
         return START_STICKY
@@ -115,6 +115,16 @@ class CoreService : Service() {
             try { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) } catch (e: Exception) { /* gone */ }
         }
         orb = null
+    }
+
+    /** Swiped away from recents: come back by itself a moment later instead of staying dead. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        try {
+            val am = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            val pi = android.app.PendingIntent.getForegroundService(this, 77, Intent(this, CoreService::class.java), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            am.set(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 3000, pi)
+        } catch (e: Throwable) { Diag.record(e) }
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

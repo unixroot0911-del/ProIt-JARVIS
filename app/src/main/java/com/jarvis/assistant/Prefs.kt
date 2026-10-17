@@ -49,6 +49,15 @@ class Prefs(context: Context) {
         get() = secret("groq_key")
         set(v) = setKey("groq_key", v)
 
+    /** Turns older than this stay in the history on screen but are no longer fed to the model (set at each update). */
+    var contextSince: Long
+        get() = sp.getLong("context_since", 0L)
+        set(v) { sp.edit().putLong("context_since", v).apply() }
+
+    var appVersion: String
+        get() = str("app_version", "")
+        set(v) = put("app_version", v)
+
     var githubToken: String
         get() = secret("github_token")
         set(v) = setKey("github_token", v)

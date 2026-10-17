@@ -16,7 +16,15 @@ import javax.crypto.spec.GCMParameterSpec
 object Secrets {
     private const val ALIAS = "axiom_master_v1"
 
+    @Volatile private var cachedKey: SecretKey? = null
+    private val decCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     private fun key(): SecretKey {
+        cachedKey?.let { return it }
+        return synchronized(this) { cachedKey ?: loadKey().also { cachedKey = it } }
+    }
+
+    private fun loadKey(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore")
         ks.load(null)
         (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
@@ -44,6 +52,12 @@ object Secrets {
     }
 
     fun dec(stored: String): String {
+        if (stored.isEmpty()) return ""
+        decCache[stored]?.let { return it }
+        return decOnce(stored).also { if (it.isNotEmpty()) decCache[stored] = it }
+    }
+
+    private fun decOnce(stored: String): String {
         if (stored.isEmpty()) return ""
         return try {
             when {

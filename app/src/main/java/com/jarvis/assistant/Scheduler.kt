@@ -331,6 +331,13 @@ class AlarmReceiver : BroadcastReceiver() {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        Scheduler.rearmAll(context)
+        val pending = goAsync()
+        Engine.scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                Scheduler.rearmAll(context)
+                Upgrade.run(context.applicationContext)
+                try { androidx.core.content.ContextCompat.startForegroundService(context, Intent(context, CoreService::class.java)) } catch (e: Throwable) { Diag.record(e) }
+            } catch (e: Throwable) { Diag.record(e) } finally { pending.finish() }
+        }
     }
 }

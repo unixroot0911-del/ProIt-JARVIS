@@ -26,9 +26,32 @@ object Diag {
         app = a
         try {
             val prev = Thread.getDefaultUncaughtExceptionHandler()
+            val main = android.os.Looper.getMainLooper().thread
             Thread.setDefaultUncaughtExceptionHandler { t, e ->
-                try { sp(a).edit().putString("last", stamp(e, "CRASH")).putBoolean("pending", true).commit() } catch (x: Throwable) { /* ignore */ }
-                prev?.uncaughtException(t, e)
+                if (t !== main && !fatal(e)) {
+                    // a stray background thread failed: note it and keep AXIOM alive
+                    try { sp(a).edit().putString("last", stamp(e, "ERROR")).apply() } catch (x: Throwable) { /* ignore */ }
+                } else {
+                    try { sp(a).edit().putString("last", stamp(e, "CRASH")).putBoolean("pending", true).commit() } catch (x: Throwable) { /* ignore */ }
+                    prev?.uncaughtException(t, e)
+                }
+            }
+            // the main thread keeps running after a failed message or callback instead of closing the app
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                var recent = 0; var windowStart = System.currentTimeMillis()
+                while (true) {
+                    try { android.os.Looper.loop() }
+                    catch (e: Throwable) {
+                        val now = System.currentTimeMillis()
+                        if (now - windowStart > 4000) { windowStart = now; recent = 0 }
+                        recent++
+                        try { sp(a).edit().putString("last", stamp(e, "ERROR")).apply() } catch (x: Throwable) { /* ignore */ }
+                        if (recent > 6 || fatal(e)) {   // a failure that keeps repeating cannot be survived: let Android restart us cleanly
+                            try { sp(a).edit().putBoolean("pending", true).commit() } catch (x: Throwable) { /* ignore */ }
+                            prev?.uncaughtException(Thread.currentThread(), e); return@post
+                        }
+                    }
+                }
             }
             val s = sp(a)
             if (s.getBoolean("pending", false)) {
@@ -40,6 +63,8 @@ object Diag {
             }
         } catch (x: Throwable) { /* ignore */ }
     }
+
+    private fun fatal(e: Throwable) = e is OutOfMemoryError
 
     fun record(e: Throwable) {
         val a = app ?: return

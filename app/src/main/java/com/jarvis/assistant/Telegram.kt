@@ -1,6 +1,8 @@
 package com.jarvis.assistant
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -112,6 +114,8 @@ object Telegram {
 /** Remote control: the paired owner chats with Jarvis from Telegram, anywhere. */
 class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
 
+    private val work = kotlinx.coroutines.sync.Mutex()
+
     suspend fun loop() {
         var offset = 0L
         while (currentCoroutineContext().isActive) {
@@ -125,15 +129,26 @@ class TelegramBot(private val prefs: Prefs, private val assistant: Assistant) {
                     offset = u.getLong("update_id") + 1
                     val m = u.optJSONObject("message") ?: continue
                     val text = m.optString("text", "")
-                    if (text.isEmpty()) {
-                        if (m.has("document") || m.has("photo") || m.has("voice") || m.has("audio")) handleFile(token, m.getJSONObject("chat").getLong("id"), m)
-                        continue
+                    val chatId = m.getJSONObject("chat").getLong("id")
+                    val quick = Regex("^/(yes|no|pick|say)_|^/pair|^/start").containsMatchIn(text.trim())
+                    // each message runs on its own, so a long job never stops the bot from hearing "yes" or the next message
+                    Engine.scope.launch {
+                        try {
+                            if (quick) handle(token, chatId, text)
+                            else work.withLock {
+                                if (text.isEmpty()) { if (m.has("document") || m.has("photo") || m.has("voice") || m.has("audio")) handleFile(token, chatId, m) }
+                                else handle(token, chatId, text)
+                            }
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Throwable) {
+                            Diag.record(e)
+                            try { withContext(Dispatchers.IO) { Telegram.send(token, chatId, "Something went wrong inside AXIOM and I recovered. Say it again if you got no answer.") } } catch (x: Throwable) { /* nothing more to do */ }
+                        }
                     }
-                    handle(token, m.getJSONObject("chat").getLong("id"), text)
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 delay(5000)
             }
         }

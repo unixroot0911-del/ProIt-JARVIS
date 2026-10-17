@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.coroutines.resume
@@ -20,6 +21,22 @@ import kotlin.coroutines.resume
 object Engine {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Diag.record(e) })
     @Volatile var foreground: Activity? = null
+
+    /** Runs a long loop forever: if it dies for any reason (even an Error), it is recorded and started again after a pause. */
+    fun supervise(block: suspend () -> Unit): Job = scope.launch {
+        var fails = 0
+        while (true) {
+            val t0 = System.currentTimeMillis()
+            try { block(); return@launch }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Throwable) {
+                Diag.record(e)
+                if (System.currentTimeMillis() - t0 > 120_000L) fails = 0
+                fails++
+                kotlinx.coroutines.delay(minOf(60_000L, 2_000L * fails))
+            }
+        }
+    }
 }
 
 /** Broadcasts the orb state so the in-app orb and the floating orb stay in sync. */
