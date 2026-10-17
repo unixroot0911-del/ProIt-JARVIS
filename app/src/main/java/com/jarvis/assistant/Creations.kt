@@ -89,11 +89,30 @@ Output ONLY the code of the file, starting with <!DOCTYPE html>, no markdown fen
         problemsOf(html)?.let {
             return "I could not get a clean version: $it. Nothing was saved. Ask again, or ask for it in two parts (structure first, then upgrade it)."
         }
+        // Run it, look at it, judge it, fix it: up to 3 rounds, before the user sees anything.
+        val sitesDir = Workspace.project("sites"); val shotBase = File(sitesDir, slug(name) + ".html")
+        var finalNote = ""; var lastScore = -1; var shots: List<File> = emptyList()
+        for (round in 1..3) {
+            onProgress("Round $round: running \"$name\" in a hidden browser and looking at it...")
+            val rep = Preview.inspect(html, shotBase)
+            if (rep == null) { finalNote = "I could not run it for review here, so it is only syntax-checked."; break }
+            shots = rep.shotFiles.ifEmpty { shots }
+            val v = Preview.review(brain, spec, html, rep)
+            lastScore = v.score
+            onProgress("Round $round: quality ${v.score}/10" + (if (v.issues.isEmpty()) ", no issues found." else ", ${v.issues.size} issue(s): " + v.issues.take(3).joinToString(" | ") { Axiom.clip(it, 90) }))
+            if (v.pass || round == 3) { if (!v.pass) finalNote = "Remaining notes: " + v.issues.take(4).joinToString("; ") { Axiom.clip(it, 110) }; break }
+            onProgress("Fixing: " + Axiom.clip(v.issues.first(), 110))
+            val fix = try {
+                clean(brain.complete(SYSTEM, "A reviewer who ran this page and looked at screenshots found these problems. Fix ALL of them, keep everything that works, and return the COMPLETE corrected file.\nPROBLEMS:\n" +
+                    v.issues.mapIndexed { i, t -> "${i + 1}. $t" }.joinToString("\n") + "\n\nORIGINAL REQUEST: " + spec + "\n\nFILE:\n" + html.take(90000), emptyList(), null, json = false, big = true))
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { onProgress("The fixer failed (${e.message}); keeping the current version."); break }
+            if (problemsOf(fix) == null) html = fix else { onProgress("The fix was broken (cut off or a syntax error); keeping the previous version."); finalNote = "Last fix attempt was rejected as broken."; break }
+        }
         withContext(Dispatchers.IO) { file.writeText(html) }
         val copy = try { val d = File(Workspace.project("sites"), slug(name) + ".html"); d.writeText(html); Workspace.note(d.path, "build_app", name); d.path } catch (e: Exception) { null }
         open(ctx, file)
         return "Built \"$name\" (${html.length / 1024} KB) and opened it. It is saved under MY APPS AND GAMES. " +
-            (if (copy != null) "A copy for sharing or hosting is in $copy. " else "") + "Tell me what to change or add and I will upgrade it."
+            (if (copy != null) "A copy for sharing or hosting is in $copy. " else "") + (if (lastScore >= 0) "Self-review score: $lastScore/10. " else "") + (if (finalNote.isNotEmpty()) "$finalNote " else "") + (if (shots.isNotEmpty()) "Preview screenshots are next to it in sites. " else "") + "Tell me what to change or add and I will upgrade it."
     }
 
     /** Null when the page is complete and its scripts parse; otherwise what is wrong. */

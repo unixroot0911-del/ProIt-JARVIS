@@ -15,7 +15,7 @@ class AxiomApp : Application() {
 
 object Axiom {
     const val NAME = "AXIOM"
-    const val VERSION = "0.15.2"
+    const val VERSION = "0.16.0"
 
     @Volatile lateinit var ctx: Context
 
