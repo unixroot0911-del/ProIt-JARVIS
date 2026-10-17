@@ -9,7 +9,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * AXIOM's operating database: tasks, projects, the audit trail, performance records, the semantic knowledge base,
  * temporary cache, procedures, templates, workflows, page watches and user-made tools. All on the phone.
  */
-class Store private constructor(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "axiom.db", null, 1) {
+class Store private constructor(ctx: Context) : SQLiteOpenHelper(ctx.applicationContext, "axiom.db", null, 2) {
 
     companion object {
         @Volatile private var inst: Store? = null
@@ -65,9 +65,28 @@ class Store private constructor(ctx: Context) : SQLiteOpenHelper(ctx.application
         db.execSQL("CREATE TABLE social (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT, platform TEXT, body TEXT, due INTEGER, status TEXT)")
         db.execSQL("CREATE TABLE learning (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, q TEXT, a TEXT, box INTEGER, due INTEGER, seen INTEGER)")
         db.execSQL("CREATE TABLE changelog (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, path TEXT, action TEXT, detail TEXT)")
+        createExt(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) { /* version 1 so far */ }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createExt(db)
+    }
+
+    /** Links, connectors, skills, mods and secrets. Created for new installs and added (never replacing anything) on update. */
+    private fun createExt(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS vault (name TEXT PRIMARY KEY, enc TEXT, ts INTEGER)")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS mcp_servers (name TEXT PRIMARY KEY, url TEXT, auth TEXT, oauth_enc TEXT, enabled INTEGER, created INTEGER,
+            last_ok INTEGER, tools_json TEXT, info TEXT)""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS connectors (name TEXT PRIMARY KEY, base_url TEXT, auth_type TEXT, auth_name TEXT, secret TEXT, notes TEXT,
+            allow_private INTEGER, enabled INTEGER, created INTEGER, last_ok INTEGER)""")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS skills (name TEXT PRIMARY KEY, descr TEXT, body TEXT, triggers TEXT, version INTEGER, enabled INTEGER,
+            created INTEGER, uses INTEGER, source TEXT)""")
+        db.execSQL("CREATE TABLE IF NOT EXISTS skill_versions (name TEXT, version INTEGER, descr TEXT, body TEXT, ts INTEGER, PRIMARY KEY (name, version))")
+        db.execSQL("""CREATE TABLE IF NOT EXISTS mods (name TEXT PRIMARY KEY, descr TEXT, kind TEXT, trig TEXT, code TEXT, html TEXT, every_min INTEGER,
+            last_run INTEGER, version INTEGER, enabled INTEGER, created INTEGER, runs INTEGER)""")
+        db.execSQL("CREATE TABLE IF NOT EXISTS mod_versions (name TEXT, version INTEGER, code TEXT, html TEXT, ts INTEGER, PRIMARY KEY (name, version))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS mod_kv (mod TEXT, k TEXT, v TEXT, PRIMARY KEY (mod, k))")
+    }
 
     // ---- small helpers: every row comes back as strings ("" for null) ----
 

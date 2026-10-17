@@ -142,6 +142,7 @@ object Ticker {
             try {
                 val c = ToolCtx(Axiom.ctx, Shared.brain(), prefs, "ticker", prefs.activeProject)
                 Watches.tick(c)
+                try { Mcp.keepAlive() } catch (e: CancellationException) { throw e } catch (e: Throwable) { Diag.record(e) }
                 for (h in synchronized(hooks) { hooks.toList() }) try { h(c) } catch (e: CancellationException) { throw e } catch (e: Exception) { Diag.record(e) }
                 val now = System.currentTimeMillis()
                 if (now - lastHouse > 3600_000L) {

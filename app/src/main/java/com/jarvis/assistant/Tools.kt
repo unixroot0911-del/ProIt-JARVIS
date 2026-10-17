@@ -63,6 +63,8 @@ object Tools {
     @Volatile private var started = false
 
     fun register(t: Tool) { synchronized(registry) { registry[t.name] = t } }
+    fun unregister(name: String) { synchronized(registry) { registry.remove(name) } }
+    fun names(prefix: String): List<String> = synchronized(registry) { registry.keys.filter { it.startsWith(prefix) } }
 
     fun ensure() {
         if (started) return

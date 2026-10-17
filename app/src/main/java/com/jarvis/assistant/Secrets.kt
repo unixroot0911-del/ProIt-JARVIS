@@ -95,6 +95,7 @@ object Secrets {
                 }
             }
         } catch (e: Exception) { /* redact what we can */ }
+        try { for (v in Vault.values()) if (t.contains(v)) t = t.replace(v, "[hidden secret]") } catch (e: Exception) { /* vault not ready */ }
         for (r in patterns) t = r.replace(t, "[hidden key]")
         return t
     }

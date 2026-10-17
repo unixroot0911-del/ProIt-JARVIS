@@ -17,5 +17,6 @@ object Registry {
         Media.register()
         Content.register()
         Ops.register()
+        Mcp.register()
     }
 }
