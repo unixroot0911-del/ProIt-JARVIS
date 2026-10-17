@@ -9,7 +9,7 @@ data class Turn(val role: String, val text: String)
 data class Notif(val app: String, val pkg: String, val title: String, val text: String, val ts: Long)
 
 /** Long-term memory, all on-device: facts, conversation, notifications, money, habits, study notes. */
-class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 5) {
+class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "jarvis_memory.db", null, 6) {
 
     private val app: Context = context.applicationContext
 
@@ -25,12 +25,25 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
         createV2(db)
         addMode(db)
         createDossier(db)
+        addSess(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 3) createV2(db)
         if (oldVersion < 4) addMode(db)
         if (oldVersion < 5) createDossier(db)
+        if (oldVersion < 6) addSess(db)
+    }
+
+    private fun addSess(db: SQLiteDatabase) {
+        for (t in listOf("chat", "turns")) {
+            try { db.execSQL("ALTER TABLE " + t + " ADD COLUMN sess TEXT NOT NULL DEFAULT 'main'") } catch (e: Exception) { /* already there */ }
+        }
+    }
+
+    fun clearSession(id: String) {
+        writableDatabase.execSQL("DELETE FROM chat WHERE sess = ?", arrayOf(id))
+        writableDatabase.execSQL("DELETE FROM turns WHERE sess = ?", arrayOf(id))
     }
 
     private fun createDossier(db: SQLiteDatabase) {
@@ -113,13 +126,13 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     }
 
     fun addTurn(role: String, text: String) {
-        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()) }
+        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()); put("sess", Sessions.cur()) }
         writableDatabase.insert("turns", null, cv)
     }
 
     fun recentTurns(limit: Int = 12): List<Turn> {
         val out = ArrayList<Turn>()
-        readableDatabase.rawQuery("SELECT role, text FROM turns WHERE mode = ? AND ts >= ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), Prefs(app).contextSince.toString(), limit.toString())).use {
+        readableDatabase.rawQuery("SELECT role, text FROM turns WHERE mode = ? AND sess = ? AND ts >= ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), Sessions.cur(), Prefs(app).contextSince.toString(), limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()
@@ -128,15 +141,15 @@ class Memory private constructor(context: Context) : SQLiteOpenHelper(context, "
     // ---- visible chat history ----
 
     fun addChat(role: String, text: String) {
-        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()) }
+        val cv = ContentValues().apply { put("role", role); put("text", text); put("ts", System.currentTimeMillis()); put("mode", mode()); put("sess", Sessions.cur()) }
         val db = writableDatabase
         db.insert("chat", null, cv)
-        db.execSQL("DELETE FROM chat WHERE id < (SELECT MAX(id) FROM chat) - 1500")
+        db.execSQL("DELETE FROM chat WHERE id < (SELECT MAX(id) FROM chat) - 4000")
     }
 
-    fun recentChat(limit: Int): List<Turn> {
+    fun recentChat(limit: Int, sess: String = Sessions.cur()): List<Turn> {
         val out = ArrayList<Turn>()
-        readableDatabase.rawQuery("SELECT role, text FROM chat WHERE mode = ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), limit.toString())).use {
+        readableDatabase.rawQuery("SELECT role, text FROM chat WHERE mode = ? AND sess = ? ORDER BY id DESC LIMIT ?", arrayOf(mode(), sess, limit.toString())).use {
             while (it.moveToNext()) out.add(Turn(it.getString(0), it.getString(1)))
         }
         return out.reversed()

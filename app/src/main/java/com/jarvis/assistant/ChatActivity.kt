@@ -1,6 +1,12 @@
 package com.jarvis.assistant
 
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
+import android.widget.HorizontalScrollView
+import androidx.appcompat.app.AlertDialog
+import kotlinx.coroutines.Dispatchers
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -36,14 +42,21 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    private var inflight = 0           // typing is never blocked while Jarvis works
-    private var typing: View? = null
+    private var cur = "main"
+    private val unread = HashMap<String, Int>()
+    private lateinit var tabs: LinearLayout
+    private lateinit var panel: LinearLayout
+    private lateinit var panelTitle: TextView
+    private lateinit var panelLines: TextView
+    private val ui = Handler(Looper.getMainLooper())
+    private val tick = object : Runnable { override fun run() { refreshPanel(); ui.postDelayed(this, 1000) } }
+    private val progressSub: () -> Unit = { ui.post { refreshPanel() } }
     private val maxBubble by lazy { (resources.displayMetrics.widthPixels * 0.78f).toInt() }
 
-    private val sub: (String, String) -> Unit = { role, text ->
+    private val sub: (String, String, String) -> Unit = { sess, role, text ->
         runOnUiThread {
-            if (role == "jarvis") hideTyping()
-            add(role, text)
+            if (sess == cur) { if (role != "system") add(role, text) }
+            else if (role == "jarvis") { unread[sess] = (unread[sess] ?: 0) + 1; renderTabs() }
         }
     }
 
@@ -53,20 +66,92 @@ class ChatActivity : AppCompatActivity() {
         memory = Memory.get(this)
         assistant = Assistant(this)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        cur = Sessions.last().let { id -> if (Sessions.list().any { it.id == id }) id else "main" }
         buildUi()
     }
 
     override fun onStart() {
         super.onStart()
-        list.removeAllViews()
-        typing = null
-        for (t in memory.recentChat(80)) add(t.role, t.text)
-        ChatBus.listeners.add(sub)
+        loadSession()
+        ChatBus.sessListeners.add(sub)
+        Progress.listeners.add(progressSub)
+        ui.post(tick)
     }
 
     override fun onStop() {
-        ChatBus.listeners.remove(sub)
+        ChatBus.sessListeners.remove(sub)
+        Progress.listeners.remove(progressSub)
+        ui.removeCallbacks(tick)
         super.onStop()
+    }
+
+    private fun loadSession() {
+        list.removeAllViews()
+        for (t in memory.recentChat(80, cur)) add(t.role, t.text)
+        unread.remove(cur)
+        Sessions.setLast(cur)
+        renderTabs(); refreshPanel()
+    }
+
+    private fun switchTo(id: String) { if (id == cur) return; cur = id; loadSession() }
+
+    private fun pill(text: String, fill: String, stroke: String) = TextView(this).apply {
+        this.text = text; setTextColor(Color.parseColor("#CFE8FF")); textSize = 13f; setPadding(30, 14, 30, 14)
+        background = GradientDrawable().apply { setColor(Color.parseColor(fill)); cornerRadius = 40f; setStroke(2, Color.parseColor(stroke)) }
+    }
+
+    private fun renderTabs() {
+        tabs.removeAllViews()
+        for (s in Sessions.list()) {
+            val working = Progress.anyActive(s.id)
+            val n = unread[s.id] ?: 0
+            val label = (if (working) "\u25CF " else "") + s.title + (if (n > 0) "  ($n)" else "")
+            val sel = s.id == cur
+            val v = pill(label, if (sel) "#1B4F8A" else "#0E1B2B", if (sel) "#2AA8FF" else "#1F4B6E")
+            v.setOnClickListener { switchTo(s.id) }
+            v.setOnLongClickListener { sessionMenu(s); true }
+            tabs.addView(v, LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 14, 0) })
+        }
+        val plus = pill("+", "#0E1B2B", "#2AA8FF")
+        plus.setOnClickListener { val s = Sessions.create(); switchTo(s.id) }
+        tabs.addView(plus)
+    }
+
+    private fun sessionMenu(s: Sessions.S) {
+        val items = if (s.id == "main") arrayOf("Rename", "Stop work in this chat") else arrayOf("Rename", "Stop work in this chat", "Delete this chat")
+        AlertDialog.Builder(this).setTitle(s.title).setItems(items) { _, i ->
+            when (items[i]) {
+                "Rename" -> {
+                    val e = EditText(this).apply { setText(s.title) }
+                    AlertDialog.Builder(this).setTitle("Name").setView(e).setPositiveButton("OK") { _, _ -> Sessions.rename(s.id, e.text.toString()); renderTabs() }.show()
+                }
+                "Stop work in this chat" -> { Progress.stop(s.id); renderTabs() }
+                else -> {
+                    Progress.stop(s.id); Sessions.delete(s.id)
+                    if (cur == s.id) { cur = "main"; loadSession() } else renderTabs()
+                }
+            }
+        }.show()
+    }
+
+    private fun refreshPanel() {
+        if (!::panel.isInitialized) return
+        val jobs = Progress.active(cur)
+        val fresh = Progress.lastAgeMs(cur) < 8000
+        if (jobs.isEmpty() && !fresh) { panel.visibility = View.GONE } else {
+            panel.visibility = View.VISIBLE
+            val secs = if (jobs.isNotEmpty()) (System.currentTimeMillis() - jobs.first().start) / 1000 else 0
+            panelTitle.text = if (jobs.isEmpty()) "AXIOM" else "Working  " + String.format("%d:%02d", secs / 60, secs % 60) + (if (jobs.size > 1) "  -  ${jobs.size} jobs" else "") + "  -  " + jobs.first().label
+            val rec = Progress.recent(cur, 5)
+            panelLines.text = if (rec.isEmpty()) "Thinking..." else rec.joinToString("\n")
+        }
+        renderTabsIfChanged()
+    }
+
+    private var lastTabState = ""
+    private fun renderTabsIfChanged() {
+        val st = Sessions.list().joinToString("|") { it.id + it.title + Progress.anyActive(it.id) + (unread[it.id] ?: 0) } + cur
+        if (st != lastTabState) { lastTabState = st; renderTabs() }
     }
 
     override fun onResume() {
@@ -103,6 +188,20 @@ class ChatActivity : AppCompatActivity() {
             letterSpacing = 0.3f
         }, LinearLayout.LayoutParams(0, -2, 1f))
 
+        tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(24, 0, 24, 12) }
+        val tabScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
+
+        panelTitle = TextView(this).apply { setTextColor(Color.parseColor("#2AA8FF")); textSize = 13f }
+        panelLines = TextView(this).apply { setTextColor(Color.parseColor("#9FB8D0")); textSize = 12f }
+        val stop = Button(this).apply { text = "STOP"; textSize = 11f; setOnClickListener { Progress.stop(cur); refreshPanel() } }
+        panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(30, 18, 30, 18)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0A1624")); cornerRadius = 28f; setStroke(2, Color.parseColor("#1F4B6E")) }
+            val head = LinearLayout(this@ChatActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            head.addView(panelTitle, LinearLayout.LayoutParams(0, -2, 1f)); head.addView(stop, LinearLayout.LayoutParams(-2, 90))
+            addView(head); addView(panelLines)
+        }
+
         list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 8, 24, 8)
@@ -135,7 +234,9 @@ class ChatActivity : AppCompatActivity() {
         inputRow.addView(send, LinearLayout.LayoutParams(-2, -2))
 
         root.addView(bar, LinearLayout.LayoutParams(-1, -2))
+        root.addView(tabScroll, LinearLayout.LayoutParams(-1, -2))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(panel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(16, 6, 16, 6) })
         root.addView(inputRow, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
     }
@@ -143,19 +244,6 @@ class ChatActivity : AppCompatActivity() {
     private fun add(role: String, text: String) {
         list.addView(ChatUi.bubble(this, role, text, maxBubble), LinearLayout.LayoutParams(-1, -2))
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun showTyping() {
-        if (typing != null) return
-        val v = ChatUi.typing(this)
-        typing = v
-        list.addView(v, LinearLayout.LayoutParams(-1, -2))
-        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
-    }
-
-    private fun hideTyping() {
-        typing?.let { list.removeView(it) }
-        typing = null
     }
 
     private fun sendTyped() {
@@ -166,14 +254,23 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun submit(text: String) {
-        inflight++
-        showTyping()
-        lifecycleScope.launch {
+        val sess = cur
+        val app = applicationContext
+        // the work belongs to the session, not to this screen: it goes on if you switch chats or leave
+        val pid = Progress.begin(sess, text)
+        val job = Engine.scope.launch(Dispatchers.Default + Sessions.element(sess)) {
             try {
-                assistant.handle(text, null, { Confirmer.ask(this@ChatActivity, it) }, { _ -> })
-            } catch (e: Exception) { /* the error is already shown in the chat */ }
-            inflight--
-            if (inflight <= 0) { inflight = 0; hideTyping() }
+                autoTitle(sess, text)
+                assistant.handle(text, null, { Confirmer.ask(app, it) }, { _ -> })
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Throwable) { Diag.record(e) }
+            finally { Progress.end(pid) }
         }
+        Progress.attach(pid, job)
+    }
+
+    private fun autoTitle(sess: String, text: String) {
+        val s = Sessions.list().firstOrNull { it.id == sess } ?: return
+        if (s.title == "New chat") { Sessions.rename(sess, text.replace(Regex("\\[attached file:[^\\]]*]"), "").trim().take(22).ifBlank { "Chat" }); ui.post { renderTabs() } }
     }
 }

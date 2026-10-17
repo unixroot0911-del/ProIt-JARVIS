@@ -22,6 +22,10 @@ object Engine {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Diag.record(e) })
     @Volatile var foreground: Activity? = null
 
+    /** Background work that stays attached to the conversation it was started from. */
+    fun launchIO(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit): Job =
+        scope.launch(Dispatchers.IO + Sessions.element(Sessions.cur()), block = block)
+
     /** Runs a long loop forever: if it dies for any reason (even an Error), it is recorded and started again after a pause. */
     fun supervise(block: suspend () -> Unit): Job = scope.launch {
         var fails = 0
@@ -51,9 +55,15 @@ object Bus {
 
 /** Every chat line (user, jarvis, system) is published here so all chat windows stay in sync. */
 object ChatBus {
+    /** Windows that show only the main conversation (the floating chat). */
     val listeners = CopyOnWriteArrayList<(String, String) -> Unit>()
-    fun publish(role: String, text: String) {
-        listeners.forEach { it(role, text) }
+    /** Windows that know about sessions: (session, role, text). */
+    val sessListeners = CopyOnWriteArrayList<(String, String, String) -> Unit>()
+    fun publish(role: String, text: String) = publishTo(Sessions.cur(), role, text)
+    fun publishTo(sess: String, role: String, text: String) {
+        if (role == "system") Progress.note(sess, text)
+        sessListeners.forEach { try { it(sess, role, text) } catch (e: Throwable) { /* a closed window */ } }
+        if (sess == "main") listeners.forEach { try { it(role, text) } catch (e: Throwable) { /* a closed window */ } }
     }
 }
 

@@ -34,7 +34,12 @@ object TaskEngine {
 
     private fun launch(id: String) {
         jobs[id]?.cancel()
-        jobs[id] = Engine.scope.launch(Dispatchers.IO) { runRoot(id) }
+        val sess = Sessions.cur()
+        val label = "Agent: " + (Tasks.get(id)?.get("goal") ?: "task")
+        jobs[id] = Engine.scope.launch(Dispatchers.IO + Sessions.element(sess)) {
+            val pid = Progress.begin(sess, label, taskId = id)
+            try { runRoot(id) } finally { Progress.end(pid) }
+        }
     }
 
     /** Called when the app starts: anything that was running when the phone or the app stopped goes on from its last good step. */
@@ -91,7 +96,7 @@ object TaskEngine {
         ChatBus.publish("system", text)
         if (telegram || root["source"] == "telegram") {
             val p = Prefs(app())
-            if (telegram) Engine.scope.launch(Dispatchers.IO) { Telegram.sendToOwner(p, text) }
+            if (telegram) Engine.launchIO { Telegram.sendToOwner(p, text) }
         }
     }
 
@@ -170,7 +175,7 @@ object TaskEngine {
                 val tid = k["id"]!!
                 inflight.add(tid)
                 slots--
-                Engine.scope.launch(Dispatchers.IO) {
+                Engine.launchIO {
                     try { runStep(id, tid) } catch (e: CancellationException) { /* stopped */ } catch (e: Exception) {
                         Diag.record(e); Tasks.set(tid, "status" to Tasks.FAILED, "fail_reason" to Secrets.redact(e.message ?: "error"))
                     } finally { inflight.remove(tid) }
@@ -329,7 +334,7 @@ object TaskEngine {
         ChatBus.publish("jarvis", msg)
         val p = Prefs(app())
         if (p.telegramToken.isNotEmpty() && p.telegramChatId.isNotEmpty()) {
-            Engine.scope.launch(Dispatchers.IO) {
+            Engine.launchIO {
                 Telegram.sendToOwner(p, (if (status == Tasks.DONE) "Done: " else "Failed: ") + shortGoal + "\n\n" + Axiom.clip(msg, 3500))
                 if (status == Tasks.DONE) for (f in Tasks.files(Tasks.get(id)!!).take(4)) { val file = java.io.File(f); if (file.exists() && file.length() < 49_000_000L) Telegram.sendFileToOwner(p, file, file.name) }
             }

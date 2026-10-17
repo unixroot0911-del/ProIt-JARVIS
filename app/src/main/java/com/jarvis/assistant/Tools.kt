@@ -124,8 +124,11 @@ object Tools {
         val t = get(name) ?: return fail("There is no tool called \"$name\".")
         val actor = if (c.direct) "user" else "agent"
         val t0 = System.currentTimeMillis()
+        val sess = Sessions.cur()
+        Progress.note(sess, "Using ${t.name}...")
         fun finish(r: ToolResult, approved: String): ToolResult {
             val ms = System.currentTimeMillis() - t0
+            Progress.note(sess, (if (r.ok) "Done: " else "Failed: ") + t.name + (if (!r.ok) " - " + Axiom.clip(r.output, 70) else " (" + (ms / 100) / 10.0 + " s)"))
             Audit.log(actor, t.name, rawArgs.toString(), (if (r.ok) "ok: " else if (r.declined) "DECLINED: " else "FAIL: ") + r.output, approved, c.project, c.task)
             Perf.log("tool", t.name, "", ms, 1, 0, r.ok, if (r.ok) "" else r.output)
             if (!r.ok && !r.declined) Procedures.note("tool", t.name, rawArgs.toString(), false, r.output)

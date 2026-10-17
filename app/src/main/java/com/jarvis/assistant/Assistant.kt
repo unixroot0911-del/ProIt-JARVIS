@@ -111,7 +111,7 @@ class Assistant(context: Context) {
         val progress: (String) -> Unit = { m ->
             onProgress(m)
             if (m.startsWith("AGENT:")) {
-                Engine.scope.launch(Dispatchers.IO) { memory.addChat("jarvis", m); ChatBus.publish("jarvis", m) }
+                Engine.launchIO { memory.addChat("jarvis", m); ChatBus.publish("jarvis", m) }
             } else {
                 ChatBus.publish("system", m)
             }
