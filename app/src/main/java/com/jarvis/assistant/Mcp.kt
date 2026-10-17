@@ -281,7 +281,7 @@ object Mcp {
                 "image", "audio" -> saveBlob(server, it.optString("mimeType"), it.optString("data"))?.let { p -> files.add(p); sb.append("[saved ${it.optString("type")}: $p]\n") }
                 "resource" -> it.optJSONObject("resource")?.let { r ->
                     if (r.has("text")) sb.append(r.optString("text")).append('\n')
-                    else if (r.has("blob")) saveBlob(server, r.optString("mimeType"), r.optString("blob"))?.let { p -> files.add(p); sb.append("[saved resource: $p]\n") }
+                    else if (r.has("blob")) saveBlob(server, r.optString("mimeType"), r.optString("blob"))?.let { p -> files.add(p); sb.append("[saved resource: $p]\n") } else Unit
                 }
                 "resource_link" -> sb.append("[link: ").append(it.optString("uri")).append("]\n")
             }
@@ -412,7 +412,7 @@ object Mcp {
             val s = slug(a.getString("server"))
             val r = withRetry(s) { c -> rpc(c, "resources/read", JSONObject().put("uri", a.getString("uri")), 60_000) }
             val cs = r.optJSONArray("contents") ?: JSONArray(); val files = ArrayList<String>(); val sb = StringBuilder()
-            for (i in 0 until cs.length()) cs.getJSONObject(i).let { if (it.has("text")) sb.append(it.optString("text")).append('\n') else if (it.has("blob")) saveBlob(s, it.optString("mimeType"), it.optString("blob"))?.let { p -> files.add(p); sb.append("[saved: $p]\n") } }
+            for (i in 0 until cs.length()) cs.getJSONObject(i).let { if (it.has("text")) sb.append(it.optString("text")).append('\n') else if (it.has("blob")) saveBlob(s, it.optString("mimeType"), it.optString("blob"))?.let { p -> files.add(p); sb.append("[saved: $p]\n") } else Unit }
             ok(Axiom.clip(sb.toString().trim().ifEmpty { "(empty)" }, 20_000), files, untrusted = true)
         }))
         Tools.register(Tool("mcp_prompts", "List the prompt templates a linked MCP server offers.", listOf(A("server", "server name")), Risk.READ, 90_000L, group = "mcp", run = { _, a ->
